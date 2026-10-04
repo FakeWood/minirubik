@@ -42,6 +42,31 @@ $$
 \text{rank} = p \times 729 + o, \qquad p \in [0, 5040),\ o \in [0, 729)
 $$
 
+### Cayley Graph
+
+By the definition of a [Cayley graph](https://mathworld.wolfram.com/CayleyGraph.html):
+
+> A Cayley graph associated with $(G, S)$, ++where $G$ is a group and $S \subseteq G$ is a connection set with identity element $I \notin S$, is the directed graph having one vertex for each group element and directed edges $(g, h)$ whenever $gh^{-1} \in S$++. The Cayley graph may depend on the choice of a generating set, and is connected iff $S$ generates $G$ (i.e., the set $S$ are group generators of $G$).
+>
+> Care is needed since the term "Cayley graph" is also used when $S$ is implicitly understood to be a set of generators for the group, in which case the graph is always connected.
+
+- **$G = \langle R, B, D \rangle$ is a group:**
+  - **Closure:** no matter how you move, the result is still a sequence of R, B, D turns. E.g., `R B` followed by `B` is `R B B`, another sequence of R, B, D turns.
+  - **Identity:** the empty sequence of R, B, D turns, which does nothing, is the identity.
+  - **Inverses:** every sequence of moves has an inverse sequence that cancels its effect and produces no change: do the inverse moves in reverse order. E.g., $(R\,B\,D)^{-1} = D'\,B'\,R'$.
+  - **Associativity:** no matter how you group the moves inside an ordered sequence, the result is the same.
+- **Stabilizer:** we choose FUL to be the fixed cubie, and $\langle R, B, D \rangle$ is the stabilizer of FUL: R, B, and D never turn a face containing FUL, so they leave FUL unchanged. Conversely, the BFS in `solver.c` reaches all 3,674,160 states with FUL fixed, so no FUL-fixing state is missing from $\langle R, B, D \rangle$.
+- **Order of $G$:** $|G| = 7! \cdot 3^6 = 3{,}674{,}160$, which matches one vertex per state. The order is discussed in the "Invariants" section, where we calculate that there are 3,674,160 states and each of them is reachable by BFS.
+- **Connected:** since $S$ generates $G$, the graph is connected. `solver.c` also checks that all states are reachable, which confirms it.
+- **$S \subseteq G$:** we choose the 9 HTM turns as the generators $S$ of $G$ for our graph. We can get all 9 turns from $\langle R, B, D \rangle$, e.g., `R2` = `R R` and `R'` = `R R R`, and R, B, D are themselves among the 9 turns. So both generate the same $G$.
+- **$I \notin S$:** there is no "don't move" among the 9 HTM turns.
+- **One vertex for each group element:** Once an element of $G$ is applied to the solved state, each element of $G$ corresponds to a legal state, which means that state can be reached from the solved state by moves. Suppose we don't fix the FUL corner and all 6 faces may turn. Since whole-cube rotations look the same in the real world, a move can produce the same result as another move seen from a different perspective of the cube. E.g., L and R' give the same result up to a whole-cube rotation. This violates the definition of one vertex for each group element, and the graph becomes a Schreier coset graph instead, which would complicate moves and encoding. So we fix FUL to get a Cayley graph rather than a Schreier coset graph.
+- **Directed edges $(g, h)$ whenever $gh^{-1} \in S$:** each HTM move is a directed edge that links two states. If there is an edge $g \to h$, there is also an edge $h \to g$, since every move has an inverse move. So the distance from solved to $s$ is the same as from $s$ to solved. This is the property `solver.c` uses to run BFS from the solved state and retrieve the path from the given state.
+- **Diameter:** The diameter of the HTM graph is 11 so all the states can be reached within 11 HTM moves. This is proved by the BFS in `solver.c`, which checks every state's shortest distance and finds that the deepest level is 11 and no state needs more moves. See [Pocket Cube](https://www.jaapsch.net/puzzles/cube2.htm#numpos) to get more information.
+  > The number of positions that can be reached in n moves from the start, but which cannot be reached in fewer than n moves:
+  > - HTM: 1, 9, 54, 321, 1847, 9992, 50136, 227536, 870072, 1887748, 623800, 2644
+  > - QTM: 1, 6, 27, 120, 534, 2256, 8969, 33058, 114149, 360508, 930588, 1350852, 782536, 90280, 276
+
 ### Search
 
 With states encoded, the solver runs a breadth-first search (BFS) outward from the solved state, applying all 9 moves (R, B, D, each as a quarter turn, half turn, or inverse) until every state has been reached. For each state, it records the inverse of the move that first reached it, which is one move toward solved. To solve a scrambled cube, it starts from the given state and follows those recorded moves back to the solved state.
