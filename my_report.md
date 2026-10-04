@@ -109,6 +109,46 @@ The memory cost mostly rely on the queue. So it is the optimize target.
 - **`parse_state`:** runs only once, on the input string. Not critical.
 - **`output_failed`:** runs only on failure. Not relevant here.
 
+### Ripes Measurements
+
+This section test the Ripes Simulator perfomance.
+We focus on Speed (retired-instructions-per-second rate) and memory (retired-instructions-per-second rate).
+
+Benchmarks are run with `RV32_ISS` and `RV32_5S` models.
+
+#### Speed
+
+- benchmark: bench_speed.s
+  - A simple loops that swap two addresses' value.
+
+##### RV32_ISS
+
+- Expected `--iret`: 6 × 20,480,000 + 7 = 122,880,007
+- test command: `.\Ripes.exe --mode cli --src ..\minirubik\bench_speed.s -t asm --proc "RV32_ISS" --iret --exectime --output runN_iss.txt`
+
+| Runs | Measured `--iret` | Time (s) | Rate (instr/s) |
+| --- | ---: | ---: | ---: |
+| #1 | 122,880,007 | 11.759 | 10.45 million |
+| #2 | 122,880,007 | 11.818 | 10.40 million |
+| #3 | 122,880,007 | 11.932 | 10.30 million |
+| Average (mean of the rates) | - | - | 10.38 million |
+
+##### RV32_5S
+
+- Expected `--iret`: 6 × 409,600 + 7 = 2,457,607
+- test command: `.\Ripes.exe --mode cli --src ..\minirubik\bench_speed.s -t asm --proc "RV32_5S" --iret --exectime --output runN_5s.txt`
+
+| Runs | Measured `--iret` | Time (s) | Rate (instr/s) |
+| --- | ---: | ---: | ---: |
+| #1 | 2,457,607 | 14.459 | 169.97 thousand |
+| #2 | 2,457,607 | 14.476 | 169.77 thousand |
+| #3 | 2,457,607 | 14.674 | 167.48 thousand |
+| Average (mean of the rates) | - | - | 169.07 thousand |
+
+#### Memory
+
+host-bytes-per-guest-byte ratio
+
 ## Stage 2: Redesign for The Target
 
 ## Stage 3: Improve Efficiency in C
