@@ -24,7 +24,7 @@ Furthermore, the sum of all orientations must be 0 (mod 3), so the last orientat
 
 Storing those 13 numbers directly makes the state space unnecessarily large. For example, the permutation
 
-```
+```text
 7 7 7 7 7 7 7
 ```
 
@@ -147,7 +147,26 @@ Benchmarks are run with `RV32_ISS` and `RV32_5S` models.
 
 #### Memory
 
-host-bytes-per-guest-byte ratio
+There are two builds of the benchmark: a small-memory one and a large-memory one. We subtract them to get the real amount of host memory used by the guest bytes the assembly writes.
+`PeakWorkingSet64` is the property used in the test script `measure_mem.ps1` to get the peak memory usage during the run. Although it counts all pages in RAM, including shared DLL pages, those cancel out in the subtraction.
+
+##### RV32_ISS
+
+| Run | Small (bytes) | Large (bytes) |
+| --- | ---: | ---: |
+| #1 | 25,264,128 | 108,892,160 |
+| #2 | 24,940,544 | 108,937,216 |
+| #3 | 25,010,176 | 108,949,504 |
+| Average | 25,071,616 | 108,926,293 |
+
+- Difference in guest bytes written: (1 MiB + 4 KiB) − 4 KiB = 1 MiB = 1,048,576 bytes
+- Average memory usage over 3 runs for SMALL: 25,071,616 bytes
+- Average memory usage over 3 runs for LARGE: 108,926,293 bytes
+- Delta: 83,854,677 bytes ≈ 79.97 MiB
+- Ratio: 83,854,677 / 1,048,576 ≈ 79.97 ≈ 80
+
+The host-bytes-per-guest-byte ratio is around 80, so the 18,405,414-byte peak of `solver.c` would cost about 1.37 GiB of host memory.
+
 
 ## Stage 2: Redesign for The Target
 
