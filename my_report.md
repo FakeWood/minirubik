@@ -167,8 +167,9 @@ There are two builds of the benchmark: a small-memory one and a large-memory one
 
 The host-bytes-per-guest-byte ratio is around 80, so the 18,405,414-byte peak of `solver.c` would cost about 1.37 GiB of host memory.
 
-
 ## Stage 2: Redesign for The Target
+
+- Constraint: optimality, 128 KiB, no full distance table, search on the target, no heap/recursion/FP/M
 
 ## Stage 3: Improve Efficiency in C
 
