@@ -1,5 +1,6 @@
 .frama-c/
 .frama-c-mcp/
 *.swp
+*.exe
 solver
 mini

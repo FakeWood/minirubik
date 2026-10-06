@@ -171,6 +171,19 @@ The host-bytes-per-guest-byte ratio is around 80, so the 18,405,414-byte peak of
 
 - Constraint: optimality, 128 KiB, no full distance table, search on the target, no heap/recursion/FP/M
 
+### Naive DFS
+
+Just DFS and go back if depth > 11 but still isn't solved
+
+- memory ≤ 128 KiB: ✅
+  - `stack[12]`: 12 × 14 = 168 B
+  - `next[12]`：12 × 1 B = 12 B
+  - `path[11]`：11 × 1 B = 11 B
+- Optimality: ❌
+  - Returns the first path it found.
+- Retired instructions ≤ $5 \times 10^7$: ❌
+  - depth 11 itself already has $9^{11}$ node
+
 ## Stage 3: Improve Efficiency in C
 
 ## Stage 4: RV32I Assembly
