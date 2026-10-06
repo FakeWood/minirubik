@@ -221,6 +221,48 @@ Here we add same-face pruning on top of the previous IDDFS approach: after the f
     | 10 | `25416373331111` | 39,971,573 |
     | 11 | `21345671111111` | 163,549,347 |
 
+### IDA\*
+
+The retired instructions must stay below $5 \times 10^7$. At roughly 200 instructions per node (the estimate from the spec), that leaves room for about $2.5 \times 10^5$ nodes. The current 1.6×10⁸ nodes for a distance-11 state is about 650× too many, so we need to cut off hopeless branches as early as possible.
+
+To do so we need a heuristic h(s), a lower bound on the number of moves still needed. A\* is the classic algorithm using f = g + h: it always expands the unexpanded node with the smallest f. To do that it keeps every generated-but-unexpanded node in an open list (a priority queue) and every expanded state in a closed set (usually a hash table). Both grow with the number of nodes, which needs a large memory pool without a heap. In the worst case the closed set approaches all 3,674,160 states, which is exactly the full table this assignment forbids.
+
+So we use IDA\*. Like IDDFS it runs depth-limited DFS with limits 0, 1, 2, …, keeping only the current path on the stack, but it backtracks as soon as g + h(s) > limit. If h is admissible, i.e. h(s) ≤ d(s) for every state, a pruned branch could never reach the solved state within the limit, so the first solution found is still the shortest.
+
+To design h(), we follow the direction given in the spec: a pattern database (PDB). A PDB ignores part of the state (for example, only the corner orientations) and stores the exact distance to solved in that smaller problem. Since ignoring information can only make the problem easier, the PDB value never exceeds the real distance, so h is admissible. The goal is a PDB small enough to fit in 128 KiB but strong enough to bring the node count down to the budget.
+
+#### PDB 1: Orientation + Permutation
+
+Two small tables, both generated on the host by `pdb_generator.c` (a BFS from solved over the relaxed problem) and linked in as read-only data:
+
+| Table | Keeps | Ignores | Index | Entries / bytes | max | mean h |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| `pdb_orient` | orientation of the 7 cubies | positions | first 6 orientations as base 3 (the 7th is implied by sum ≡ 0 mod 3) | 729 | 6 | 4.44 |
+| `pdb_perm` | positions of the 7 cubies | orientations | Lehmer code of the permutation | 5,040 | 7 | 4.86 |
+
+$h(s) = \max(\text{pdb\_orient}, \text{pdb\_perm})$. The max of two admissible bounds is still admissible. The sum is not, because every move changes both positions and orientations, so one move would be counted twice.
+
+- static data ≤ 128 KiB: ✅
+  - 5,769 B of PDB plus 102 B of move data
+- Optimality: ✅
+  - Checked on the host by `pdb_check.c`: a full BFS gives the true distance $d(s)$ of all 3,674,160 states (host-only oracle, not shipped to the target), and $h(s) \le d(s)$ holds for every state (H1). All 2,644 distance-11 states are solved in exactly 11 moves.
+- Retired instructions ≤ $5 \times 10^7$: ❌ (not yet measured on target, but likely over)
+  - h is weak: on average it is 3.6 moves below the true distance, and up to 8 below.
+
+    | $d-h$ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | states | 17,108 | 83,910 | 377,894 | 1,107,100 | 1,416,753 | 591,000 | 77,589 | 2,738 | 68 |
+
+  - Nodes over all 2,644 distance-11 states:
+
+    | mean | max |
+    | ---: | ---: |
+    | 206,658 | 639,837 |
+
+  - The worst state is `54721631111111`. At 200 instructions per node this is about $1.3 \times 10^8$ instructions, 2.6× over the budget. To pass with this table, a node would have to cost at most about 78 instructions.
+
+#### Trace One Face
+
 ## Stage 3: Improve Efficiency in C
 
 ## Stage 4: RV32I Assembly
