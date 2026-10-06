@@ -171,18 +171,55 @@ The host-bytes-per-guest-byte ratio is around 80, so the 18,405,414-byte peak of
 
 - Constraint: optimality, 128 KiB, no full distance table, search on the target, no heap/recursion/FP/M
 
-### Naive DFS
+### 1. Naive DFS
 
-Just DFS and go back if depth > 11 but still isn't solved
+Plain DFS that backtracks when it reaches depth 11 without solving the cube.
 
-- memory ≤ 128 KiB: ✅
-  - `stack[12]`: 12 × 14 = 168 B
-  - `next[12]`：12 × 1 B = 12 B
-  - `path[11]`：11 × 1 B = 11 B
+- static data ≤ 128 KiB: ✅
+  - a few dozen bytes for `source`, `twist` and `move_names`
 - Optimality: ❌
   - Returns the first path it found.
 - Retired instructions ≤ $5 \times 10^7$: ❌
-  - depth 11 itself already has $9^{11}$ node
+  - Worst case is the whole tree, $\sum_{d=1}^{11} 9^d \approx 3.5\times10^{10}$ nodes
+
+### 2. IDDFS
+
+Iterative deepening tries depth limits 0, 1, …, 11 in order. Like BFS, it finishes each depth before the next one, but like DFS, it keeps only one path in memory. This ensures the found path is the shortest.
+
+- static data ≤ 128 KiB: ✅
+  - a few dozen bytes for `source`, `twist` and `move_names`
+- Optimality: ✅
+  - Returns the first path it found. Because it tries depth limits in order, the first found path is the shortest.
+- Retired instructions ≤ $5 \times 10^7$: ❌
+  - IDDFS re-searches the shallower levels on every pass. For a depth-11 state:
+    - Lower bound (limits 0–10 fully searched): $\sum_{L=1}^{10}\sum_{d=1}^{L} 9^d \approx 4.4\times10^{9}$ node
+    - Worst case: $\sum_{L=1}^{11}\sum_{d=1}^{L} 9^d \approx 4.0\times10^{10}$ node
+
+### 3. Same-face Pruning
+
+After a move on face f, any next move on f either cancels it or merges into one move. For example, `R` `R` = `R2`, `R` `R2` = `R'` and `R` `R'` does nothing. So we can skip these kinds of moves and reduce the nodes at no cost.
+
+Here we add same-face pruning on top of the previous IDDFS approach: after the first move, only the 6 moves on the other two faces are tried, so depth $d$ has $9\cdot6^{d-1}$ nodes instead of $9^d$.
+
+- static data ≤ 128 KiB: ✅
+  - a few dozen bytes for `source`, `twist` and `move_names`
+- Optimality: ✅
+  - Two consecutive moves on the same face can always be merged into one move or removed, so a path containing them is never a shortest path. Pruning only removes such paths, so the shortest path is never pruned.
+- Retired instructions ≤ $5 \times 10^7$: ❌
+  - About 50× fewer nodes than plain IDDFS, but still far over the budget. A search with limit $L$ visits $N(L)=\sum_{d=1}^{L} 9\cdot6^{d-1}=\frac{9}{5}(6^L-1)$ nodes. For a depth-11 state:
+    - Lower bound (limits 0–10 fully searched): $\sum_{L=1}^{10} N(L) \approx 1.3\times10^{8}$
+    - Worst case: $\sum_{L=1}^{11} N(L) \approx 7.8\times10^{8}$ node
+  - Measured nodes:
+
+    | Distance | State | Nodes |
+    | ---: | --- | ---: |
+    | 8 | `62345713133111` | 1,149,862 |
+    | 8 | `24316572122213` | 1,567,270 |
+    | 8 | `25713642221111` | 686,310 |
+    | 9 | `24513763133333` | 14,156,521 |
+    | 9 | `43752611332133` | 5,056,836 |
+    | 10 | `25416373331111` | 39,971,573 |
+    | 11 | `21345671111111` | 163,549,347 |
 
 ## Stage 3: Improve Efficiency in C
 

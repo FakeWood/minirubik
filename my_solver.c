@@ -78,33 +78,51 @@ static int parse_state(const char *input, state_t *state)
     return input[14] == '\0' && valid(state);
 }
 
-/* Naive depth-first search without recursion: an explicit stack of states and
- * the next move to try at each depth. A branch is cut only when it would grow
- * past MAX_DEPTH moves. Returns the length of the first solution found (not
- * necessarily the shortest), or -1 if none exists within MAX_DEPTH.
+static unsigned long nodes; /* expanded nodes, for measurement */
+
+/* Depth-limited DFS without recursion: an explicit stack of states and the
+ * next move to try at each depth. Returns 1 if a solution of exactly `limit`
+ * moves exists (stored in path), 0 otherwise.
  */
-static int dfs(state_t start, uint8_t path[MAX_DEPTH])
+static int dls(state_t start, int limit, uint8_t path[MAX_DEPTH])
 {
-    state_t stack[MAX_DEPTH + 1];  // [0, 11]
-    uint8_t next[MAX_DEPTH + 1];   // [0, 9]
+    state_t stack[MAX_DEPTH + 1];
+    uint8_t next[MAX_DEPTH + 1];
     int depth = 0;
 
-    if (is_solved(&start))
-        return 0;
     stack[0] = start;
     next[0] = 0;
     while (depth >= 0) {
-        if (depth == MAX_DEPTH || next[depth] == MOVES) {
+        if (depth == limit) {
+            if (is_solved(&stack[depth]))
+                return 1;
+            --depth;
+            continue;
+        }
+        if (next[depth] == MOVES) {
             --depth;
             continue;
         }
         uint8_t move = next[depth]++;
+        /* Same face twice in a row cancels or merges into one move. */
+        if (depth > 0 && move / 3U == path[depth - 1] / 3U)
+            continue;
+        ++nodes;
         path[depth] = move;
         stack[depth + 1] = apply_move(stack[depth], move);
-        if (is_solved(&stack[depth + 1]))
-            return depth + 1;
         next[++depth] = 0;
     }
+    return 0;
+}
+
+/* Iterative deepening: try limits 0, 1, ..., MAX_DEPTH. The first limit that
+ * succeeds is the shortest solution length, so the result is optimal.
+ */
+static int iddfs(state_t start, uint8_t path[MAX_DEPTH])
+{
+    for (int limit = 0; limit <= MAX_DEPTH; ++limit)
+        if (dls(start, limit, path))
+            return limit;
     return -1;
 }
 
@@ -118,7 +136,8 @@ int main(int argc, char **argv)
                 argc > 0 && argv[0] ? argv[0] : "my_solver");
         return 2;
     }
-    int length = dfs(state, path);
+    int length = iddfs(state, path);
+    fprintf(stderr, "nodes: %lu\n", nodes);
     if (length < 0) {
         fputs("no solution within 11 moves\n", stderr);
         return 1;
