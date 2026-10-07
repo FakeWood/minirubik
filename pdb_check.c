@@ -14,7 +14,6 @@
 #include <string.h>
 
 #include "cube.h"
-#include "host_rank.h"
 #include "search.h"
 
 enum {

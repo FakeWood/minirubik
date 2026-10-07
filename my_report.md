@@ -315,6 +315,35 @@ $h(s) = \text{pdb\_r\_face}[\text{rank\_r\_face}(s)]$
 
   - The mean improves, but the worst case is worse than PDB 1. The worst state is still `54721631111111`: at 200 instructions per node, 857,595 nodes is about $1.7 \times 10^8$ instructions, 3.4× over the budget.
 
+#### PDB 3: PDB 1 + PDB 2
+
+PDB 1 and PDB 2 fail in different places. PDB 2 is blind when the R face is solved but the other three cubies are not, while PDB 1 sees all 7 cubies and still gives a non-zero bound there. So we take the max of all three tables:
+
+$h(s) = \max(\text{pdb\_orient}, \text{pdb\_perm}, \text{pdb\_r\_face})$
+
+Each table is admissible, so their max is admissible too.
+
+- static data ≤ 128 KiB: ✅
+  - 73,809 B of PDB (68,040 + 5,040 + 729), about 72.1 KiB
+- Optimality: ✅
+  - `pdb_check.c`: $h(s) \le d(s)$ for all 3,674,160 states, and all 2,644 distance-11 states are solved in exactly 11 moves.
+- Retired instructions ≤ $5 \times 10^7$: ⚠️ (estimated, not yet measured on target)
+  - The mean gap $d - h$ drops to 2.38, and the largest gap shrinks from 11 to 7:
+
+    | $d-h$ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | states | 173,321 | 549,253 | 1,260,501 | 1,161,347 | 455,846 | 70,358 | 3,455 | 79 |
+
+  - Nodes over all 2,644 distance-11 states:
+
+    | | mean | max |
+    | --- | ---: | ---: |
+    | PDB 1 | 206,658 | 639,837 |
+    | PDB 2 (R face) | 121,174 | 857,595 |
+    | PDB 3 (both) | 30,050 | 203,475 |
+
+  - Combining them cuts the max by 3.1× over PDB 1 and 4.2× over PDB 2: the two tables cover each other's worst states. The worst state is still `54721631111111`. At 200 instructions per node, 203,475 nodes is about $4.1 \times 10^7$ instructions, under the budget with only about 20% margin. Each node now does three ranks and three lookups, so the real cost per node has to be measured on the target.
+
 ## Stage 3: Improve Efficiency in C
 
 ## Stage 4: RV32I Assembly

@@ -14,7 +14,6 @@
 #include <string.h>
 
 #include "cube.h"
-#include "host_rank.h"
 
 enum {
     ORIENT_SIZE = 729,   /* 3^6 */
