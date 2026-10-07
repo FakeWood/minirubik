@@ -4,7 +4,7 @@
 
 - Ripes
   - Software: Ripes-v2.2.6-106-g5b8a616-win-x86_64
-  - Model: Single-cycle processor
+  - Model: RV32_ISS
 - minirubik
   - Forked commit: 3811ad0
 
@@ -235,7 +235,7 @@ To design h(), we follow the direction given in the spec: a pattern database (PD
 
 Two small tables, both generated on the host by `pdb_generator.c` (a BFS from solved over the relaxed problem) and linked in as read-only data:
 
-| Table | Keeps | Ignores | Index | Entries / bytes | max | mean h |
+| Table | Keeps | Ignores | Index | Entries | max h | mean h |
 | --- | --- | --- | --- | ---: | ---: | ---: |
 | `pdb_orient` | orientation of the 7 cubies | positions | first 6 orientations as base 3 (the 7th is implied by sum ≡ 0 mod 3) | 729 | 6 | 4.44 |
 | `pdb_perm` | positions of the 7 cubies | orientations | Lehmer code of the permutation | 5,040 | 7 | 4.86 |
@@ -243,7 +243,7 @@ Two small tables, both generated on the host by `pdb_generator.c` (a BFS from so
 $h(s) = \max(\text{pdb\_orient}, \text{pdb\_perm})$. The max of two admissible bounds is still admissible. The sum is not, because every move changes both positions and orientations, so one move would be counted twice.
 
 - static data ≤ 128 KiB: ✅
-  - 5,769 B of PDB plus 102 B of move data
+  - 5,769 B of PDB
 - Optimality: ✅
   - Checked on the host by `pdb_check.c`: a full BFS gives the true distance $d(s)$ of all 3,674,160 states (host-only oracle, not shipped to the target), and $h(s) \le d(s)$ holds for every state (H1). All 2,644 distance-11 states are solved in exactly 11 moves.
 - Retired instructions ≤ $5 \times 10^7$: ❌ (not yet measured on target, but likely over)
@@ -261,7 +261,59 @@ $h(s) = \max(\text{pdb\_orient}, \text{pdb\_perm})$. The max of two admissible b
 
   - The worst state is `54721631111111`. At 200 instructions per node this is about $1.3 \times 10^8$ instructions, 2.6× over the budget. To pass with this table, a node would have to cost at most about 78 instructions.
 
-#### Trace One Face
+#### PDB 2: R Face
+
+PDB 1 is weak because each table throws away half of the state: `pdb_orient` does not know where the cubies are, `pdb_perm` does not know how they are twisted. A better abstraction keeps **both** position and orientation, but only for some of the cubies.
+
+We track the four cubies of the R face, positions 1, 2, 4, 5 in the README numbering, which are cubies `{0, 1, 3, 4}` in the solver (the anchor at position 0 is dropped, so every label shifts down by 1). They are exactly the positions that `source[0]` (the R move) cycles. The other three cubies `{2, 5, 6}` are ignored completely.
+
+- Placements: the 4 cubies sit in 4 distinct positions out of 7, $7 \cdot 6 \cdot 5 \cdot 4 = 840$
+- Twists: each tracked cubie has 3 orientations, $3^4 = 81$ (the sum constraint involves all 7 cubies. We can not skip the 4th twists here)
+- Table size: $840 \times 81 = 68{,}040$ entries, 1 byte each
+
+The table is admissible for the same reason as PDB 1.
+
+##### Change in ranking: follow the cubie, not the position
+
+`rank_perm` asks, for each **position** $i$, which cubie is there, and encodes it as "how many cubies to the right of $i$ are smaller", which is the cubie's rank among the cubies not used yet. That works because all 7 positions are encoded.
+
+With only 4 cubies tracked, there is no full sequence to look "to the right" of, so the direction is reversed. For each tracked **cubie** $k$ we ask which position it is in:
+
+1. `where[cubie] = position` is built first as the inverse of `p[position] = cubie`, and `pos = where[r_cubies[k]]`.
+2. The digit is not `pos` itself but $d_k = \text{pos} - \text{skip}$, where `skip` is the number of earlier tracked cubies ($j < k$) in a position below `pos`. So $d_k$ is the position counted among the positions not yet taken by `r_cubies[0..k-1]`, and $d_k < 7 - k$.
+3. The digits form a mixed-radix number with bases 7, 6, 5, 4, and the four twists are appended in base 3:
+
+$$\text{place} = ((d_0 \cdot 6 + d_1) \cdot 5 + d_2) \cdot 4 + d_3, \qquad \text{rank} = \text{place} \times 81 + \text{turned}$$
+
+The solved state is no longer index 0. Its placement digits are $(0, 0, 1, 1)$, so its rank is $5 \times 81 = 405$. The BFS in `pdb_generator.c` now starts from `rank(solved)` instead of 0.
+
+##### Result
+
+$h(s) = \text{pdb\_r\_face}[\text{rank\_r\_face}(s)]$
+
+| Table | Entries | max h | mean h |
+| --- | ---: | ---: | ---: |
+| `pdb_r_face` | 68,040 | 8 | 6.29 |
+
+- static data ≤ 128 KiB: ✅
+  - 68,040 B of PDB
+- Optimality: ✅
+  - `pdb_check.c`: $h(s) \le d(s)$ for all 3,674,160 states, and all 2,644 distance-11 states are solved in exactly 11 moves.
+- Retired instructions ≤ $5 \times 10^7$: ❌ (estimated, not yet measured on target)
+  - The mean gap $d - h$ drops from 3.61 to 2.46, but the tail gets longer: up to 11, because a state whose R face is already solved gets $h = 0$ no matter how scrambled the other three cubies are.
+
+    | $d-h$ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 |
+    | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+    | states | 170,071 | 537,081 | 1,225,146 | 1,106,114 | 479,349 | 125,387 | 25,242 | 4,651 | 921 | 166 | 29 | 3 |
+
+  - Nodes over all 2,644 distance-11 states:
+
+    | | mean | max |
+    | --- | ---: | ---: |
+    | PDB 1 | 206,658 | 639,837 |
+    | R face | 121,174 | 857,595 |
+
+  - The mean improves, but the worst case is worse than PDB 1. The worst state is still `54721631111111`: at 200 instructions per node, 857,595 nodes is about $1.7 \times 10^8$ instructions, 3.4× over the budget.
 
 ## Stage 3: Improve Efficiency in C
 

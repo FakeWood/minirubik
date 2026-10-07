@@ -12,9 +12,7 @@
  */
 static uint8_t heuristic(const state_t *state)
 {
-    uint8_t ho = pdb_orient[rank_orient(state)];
-    uint8_t hp = pdb_perm[rank_perm(state)];
-    return ho > hp ? ho : hp;
+    return pdb_r_face[rank_r_face(state)];
 }
 
 static int is_solved(const state_t *state)
