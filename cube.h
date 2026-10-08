@@ -65,26 +65,38 @@ static uint16_t rank_orient(const state_t *state)
  * ci counts the cubies after position i with a smaller id. The radix shrinks
  * at every digit, so a loop would multiply by a variable; written out, each
  * radix is a constant and the multiply becomes shifts and adds.
+ *
+ * Both loops have fixed trip counts, so they are unrolled too: the 7 ids are
+ * loaded once into registers, and the 21 comparisons are one sltu and one add
+ * each, with no loop counter, no branch and no address arithmetic. Locals are
+ * 32-bit because RV32I has no 8-bit ALU: a uint8_t would cost an andi after
+ * every add.
  */
 static uint16_t rank_perm(const state_t *state)
 {
-    uint8_t c[CUBIES - 1];
-    for (uint8_t i = 0; i < CUBIES - 1; ++i) {
-        uint8_t smaller = 0;
-        for (uint8_t j = (uint8_t) (i + 1); j < CUBIES; ++j)
-            smaller = (uint8_t) (smaller + (state->p[j] < state->p[i]));
-        c[i] = smaller;
-    }
-    uint32_t rank = c[0];
-    rank = (rank << 2) + (rank << 1) + c[1]; /* * 6 */
-    rank = (rank << 2) + rank + c[2];        /* * 5 */
-    rank = (rank << 2) + c[3];               /* * 4 */
-    rank = (rank << 1) + rank + c[4];        /* * 3 */
-    rank = (rank << 1) + c[5];               /* * 2 */
+    const uint8_t *p = state->p;
+    uint32_t p0 = p[0], p1 = p[1], p2 = p[2], p3 = p[3], p4 = p[4],
+             p5 = p[5], p6 = p[6];
+    uint32_t c0 = (p1 < p0) + (p2 < p0) + (p3 < p0) + (p4 < p0) + (p5 < p0) +
+                  (p6 < p0);
+    uint32_t c1 = (p2 < p1) + (p3 < p1) + (p4 < p1) + (p5 < p1) + (p6 < p1);
+    uint32_t c2 = (p3 < p2) + (p4 < p2) + (p5 < p2) + (p6 < p2);
+    uint32_t c3 = (p4 < p3) + (p5 < p3) + (p6 < p3);
+    uint32_t c4 = (p5 < p4) + (p6 < p4);
+    uint32_t c5 = (p6 < p5);
+
+    uint32_t rank = c0;
+    rank = (rank << 2) + (rank << 1) + c1; /* * 6 */
+    rank = (rank << 2) + rank + c2;        /* * 5 */
+    rank = (rank << 2) + c3;               /* * 4 */
+    rank = (rank << 1) + rank + c4;        /* * 3 */
+    rank = (rank << 1) + c5;               /* * 2 */
     return (uint16_t) rank;
 }
 
-/* The cubies that sit on the R face when solved; R cycles exactly these. */
+/* The cubies that sit on the R face when solved; R cycles exactly these.
+ * rank_r_face is unrolled over them, so it names 0, 1, 3, 4 directly.
+ */
 static const uint8_t r_cubies[4] = {0, 1, 3, 4};
 
 /* Positions and twists of the four R-face cubies, ignoring the other three:
@@ -104,29 +116,40 @@ static const uint8_t r_cubies[4] = {0, 1, 3, 4};
  */
 static uint32_t rank_r_face(const state_t *state)
 {
-    /* where[cubie] = position, the inverse of p[position] = cubie. */
-    uint8_t where[CUBIES];
-    for (uint8_t i = 0; i < CUBIES; ++i)
-        where[state->p[i]] = i;
+    const uint8_t *p = state->p, *o = state->o;
 
-    uint8_t d[4];
-    uint32_t turned = 0;
-    for (uint8_t k = 0; k < 4; ++k) {
-        uint8_t pos = where[r_cubies[k]];
-        /* dk = pos minus the earlier tracked cubies sitting below it, i.e.
-         * the number of still-free positions below pos.
-         */
-        uint8_t skip = 0;
-        for (uint8_t j = 0; j < k; ++j)
-            skip = (uint8_t) (skip + (where[r_cubies[j]] < pos));
-        d[k] = (uint8_t) (pos - skip);
-        turned = (turned << 1) + turned + state->o[pos]; /* * 3 */
-    }
+    /* where[cubie] = position, the inverse of p[position] = cubie. Unrolled,
+     * each store is lbu, add, sb with the position as a constant.
+     */
+    uint8_t where[CUBIES];
+    where[p[0]] = 0;
+    where[p[1]] = 1;
+    where[p[2]] = 2;
+    where[p[3]] = 3;
+    where[p[4]] = 4;
+    where[p[5]] = 5;
+    where[p[6]] = 6;
+
+    /* Positions of r_cubies {0, 1, 3, 4}, read at constant offsets. */
+    uint32_t w0 = where[0], w1 = where[1], w3 = where[3], w4 = where[4];
+
+    /* dk = pos minus the earlier tracked cubies sitting below it, i.e. the
+     * number of still-free positions below pos: 6 sltu and 6 sub in all.
+     */
+    uint32_t d1 = w1 - (w0 < w1);
+    uint32_t d2 = w3 - (w0 < w3) - (w1 < w3);
+    uint32_t d3 = w4 - (w0 < w4) - (w1 < w4) - (w3 < w4);
+
     /* Radices 6, 5, 4 written out as constants, as in rank_perm. */
-    uint32_t place = d[0];
-    place = (place << 2) + (place << 1) + d[1]; /* * 6 */
-    place = (place << 2) + place + d[2];        /* * 5 */
-    place = (place << 2) + d[3];                /* * 4 */
+    uint32_t place = w0;
+    place = (place << 2) + (place << 1) + d1; /* * 6 */
+    place = (place << 2) + place + d2;        /* * 5 */
+    place = (place << 2) + d3;                /* * 4 */
+
+    uint32_t turned = o[w0];
+    turned = (turned << 1) + turned + o[w1]; /* * 3 */
+    turned = (turned << 1) + turned + o[w3];
+    turned = (turned << 1) + turned + o[w4];
     return (place << 6) + (place << 4) + place + turned; /* place * 81 */
 }
 

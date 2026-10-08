@@ -475,6 +475,168 @@ $$81p = 64p + 16p + p = (p \ll 6) + (p \ll 4) + p$$
   - `pdb_generator.c` rebuilt with the new `cube.h` produces a `pdb.h` identical byte for byte.
   - `pdb_check.c` prints the same output as before: H1 admissible, all 2,644 distance-11 states solved in 11 moves, nodes max 203,475.
 
+### Improve Efficiency
+
+At about 620 instructions per node the search is still 2.5× over the budget (see [Unsupported Instructions Removed](#unsupported-instructions-removed)), so first we find where those 620 go.
+
+#### Where the Work Is
+
+`search_stats.c` is a copy of `dls` with counters added and the cutoff split per table, so it expands exactly the same nodes. It counts on the host what `dls` does for the worst state `54721631111111`:
+
+```sh
+make search_stats && ./search_stats
+```
+
+| event | count |
+| --- | ---: |
+| loop iterations | 237,379 |
+| nodes (`apply_move` + `heuristic`) | 203,475 |
+| pops (a level runs out of moves) | 33,902 |
+| goal tests (`is_solved`) | 2 |
+
+Every node costs one `apply_move` and one `heuristic`, i.e. three ranks and three lookups. Pops and goal tests are rare, so the per-node functions are what we need to measure.
+
+#### Cost per Call on Ripes
+
+`bench.c` calls one function 1,024 times in a loop, picked at compile time with `-DBENCH=n`:
+
+| `BENCH` | loop body |
+| --- | --- |
+| 0 | read one byte (baseline) |
+| 1 | `apply_move` |
+| 2 | `rank_orient` |
+| 3 | `rank_perm` |
+| 4 | `rank_r_face` |
+| 5 | `heuristic` |
+
+- The inputs cycle through 16 states, each scrambled by two moves from the previous one, so data-dependent paths (such as the mod-3 branch) are exercised rather than one fixed state.
+- Results are summed into `acc` and stored to a `volatile` variable, and an empty `asm volatile("" ::: "memory")` sits in the loop, so GCC cannot drop the calls or hoist them out of the loop.
+- Each build goes through the same path as `ripes_main.s` (`riscv64-unknown-elf-gcc -O2 -S`, `gcc2ripes.py`, Ripes `RV32_ISS --iret`).
+- Cost per call = (iret of `BENCH=n` − iret of `BENCH=0`) / 1024. Subtracting the baseline removes setup, scrambling, the loop itself and the exit.
+
+`bench.sh` runs all six builds and prints the table below:
+
+```sh
+sh bench.sh
+```
+
+| `BENCH` | retired | per call |
+| --- | ---: | ---: |
+| 0 | 13,620 | — |
+| 1 `apply_move` | 143,412 | 126.8 |
+| 2 `rank_orient` | 52,536 | 38.0 |
+| 3 `rank_perm` | 262,453 | 243.0 |
+| 4 `rank_r_face` | 189,752 | 172.0 |
+| 5 `heuristic` | 487,248 | 462.5 |
+
+`heuristic` (462.5) is the three ranks (453) plus three lookups and two maxes. Per node:
+
+| part | instructions | share |
+| --- | ---: | ---: |
+| `rank_perm` | 243 | 39% |
+| `rank_r_face` | 172 | 28% |
+| `apply_move` | 127 | 20% |
+| `rank_orient` | 38 | 6% |
+| lookups, max, `dls` loop, `++nodes` | ~40 | 6% |
+| total | ~620 | |
+
+This matches the full run, 126,147,427 / 203,475 ≈ 620, so the per-call numbers add up.
+
+#### Which Table Cuts
+
+Every node computes all three ranks, but one table above the threshold $t = \text{limit} - \text{depth} - 1$ is already enough to cut. `search_stats` also checks each table against $t$ on its own. Over the 203,475 nodes of the worst state:
+
+| table | nodes it would cut alone |
+| --- | ---: |
+| `pdb_orient` | 62,076 (31%) |
+| `pdb_perm` | 111,841 (55%) |
+| `pdb_r_face` | 143,552 (71%) |
+| none (node expanded) | 33,903 (17%) |
+
+So 83% of the nodes are cut, and for most of them at least one of the three ranks was not needed.
+
+The two ranks that cost the most, `rank_perm` and `rank_r_face`, are two thirds of every node, so they come first.
+
+#### Unroll Fixed Loops
+
+`rank_perm` compiled by GCC spends most of its time in the inner loop, 8 instructions per comparison, of which only 3 do the work:
+
+```asm
+.L12:
+    add   a3,a0,a4      # address p + j: RV32I has no base + index addressing
+    lbu   a3,0(a3)      # load p[j]                      (work)
+    addi  a4,a4,1       # ++j                            (loop)
+    andi  a2,a4,0xff    # j is uint8_t, truncate to 8 bits
+    sltu  a3,a3,a6      # p[j] < p[i]                    (work)
+    add   a5,a5,a3      # smaller += ...                 (work)
+    andi  a5,a5,0xff    # smaller is uint8_t, truncate
+    bne   a2,a1,.L12    # j != 7                         (loop)
+```
+
+The overhead comes from three things RV32I does not do cheaply:
+
+- **Loop control**: every iteration pays a counter update and a branch, even though the trip count is fixed.
+- **Variable index**: loads and stores only take base + constant offset, so `p[j]` needs an `add` first. With a constant index, the offset goes straight into `lbu`.
+- **8-bit locals**: RV32I has no 8-bit ALU, so every add on a `uint8_t` is followed by `andi 0xff`.
+
+On top of that, digits stored to an array (`c[]`, `d[]`) make a round trip through memory, a store and a load each, where a register would do.
+
+All loops in the ranks have fixed trip counts, so we write them out and keep every local in a `uint32_t` register.
+
+##### `rank_perm`
+
+The 7 ids are loaded once, and each of the 21 comparisons becomes one `sltu` and one `add`:
+
+```c
+uint32_t p0 = p[0], p1 = p[1], ..., p6 = p[6];
+uint32_t c0 = (p1 < p0) + (p2 < p0) + (p3 < p0) + (p4 < p0) + (p5 < p0) + (p6 < p0);
+uint32_t c1 = (p2 < p1) + (p3 < p1) + (p4 < p1) + (p5 < p1) + (p6 < p1);
+...
+uint32_t c5 = (p6 < p5);
+```
+
+| | loads | per comparison | branches |
+| --- | ---: | ---: | ---: |
+| before | 6 `p[i]` + 21 `p[j]` + 6 `c[]` = 33 | 8 | 27 |
+| after | 7 | 2 | 0 |
+
+That is about 7 + 21 × 2 = 49 instructions for the digits plus the Horner steps. The compiled function is 60 instructions long, straight-line, with no branch.
+
+##### `rank_r_face`
+
+`where[]` still has to go through memory: finding which position holds a cubie means indexing by a variable. But the 7 stores now have constant values, the 4 tracked positions `where[0]`, `where[1]`, `where[3]`, `where[4]` are read at constant offsets, and the nested loop for the digits becomes 6 `sltu` and 6 `sub`:
+
+```c
+uint32_t w0 = where[0], w1 = where[1], w3 = where[3], w4 = where[4];
+uint32_t d1 = w1 - (w0 < w1);
+uint32_t d2 = w3 - (w0 < w3) - (w1 < w3);
+uint32_t d3 = w4 - (w0 < w4) - (w1 < w4) - (w3 < w4);
+```
+
+Only the 4 twists `o[w]` still need an `add` before the `lbu`, since `w` is a variable.
+
+##### Result: Unrolled Ranks
+
+`sh bench.sh` after each change:
+
+| per call | start | `rank_perm` unrolled | `rank_r_face` unrolled |
+| --- | ---: | ---: | ---: |
+| `apply_move` | 126.8 | 126.8 | 126.8 |
+| `rank_orient` | 38.0 | 38.0 | 38.0 |
+| `rank_perm` | 243.0 | **56.0** | 56.0 |
+| `rank_r_face` | 172.0 | 172.0 | **76.0** |
+| `heuristic` | 462.5 | 274.5 | 191.0 |
+
+And the full search on the worst state (`ripes_main.s`, `RV32_ISS`):
+
+| | retired | per node | vs. budget |
+| --- | ---: | ---: | ---: |
+| start | 126,147,427 | ≈ 620 | 2.52× |
+| `rank_perm` unrolled | 90,776,690 | ≈ 446 | 1.82× |
+| `rank_r_face` unrolled | 72,145,525 | ≈ 355 | 1.44× |
+
+The search is unchanged: `pdb.h` regenerates byte for byte, `pdb_check` prints the same output, and Ripes still prints the same 11 moves and 203,475 nodes. Still 1.44× over, so each node has to lose about 110 more instructions.
+
 ## Stage 4: RV32I Assembly
 
 ### Unsupported Instructions Removed

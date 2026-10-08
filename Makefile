@@ -17,6 +17,9 @@ RV_CFLAGS := -march=rv32i -mabi=ilp32 -O2 -std=c99 -ffreestanding -nostdlib
 
 .PHONY: all check prove clean indent rv32i-check
 
+search_stats: search_stats.c cube.h search.h pdb.h
+	$(CC) $(CFLAGS) $< -o $@
+
 # Compiled search core as one assembly file Ripes can run. -mno-explicit-relocs
 # makes GCC load addresses with la instead of %hi/%lo pairs, because Ripes
 # treats %lo as unsigned and rejects any low part above 2047.
