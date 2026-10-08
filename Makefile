@@ -12,7 +12,23 @@ VECTORS := tests/solutions.txt
 INVALID_STATES := 1234567111111 123456711111111 02345671111111 82345671111111 \
 	12345671111110 12345671111114 1234567111111a 11345671111111 12345671111112
 
-.PHONY: all check prove clean indent
+RV_CC ?= riscv64-unknown-elf-gcc
+RV_CFLAGS := -march=rv32i -mabi=ilp32 -O2 -std=c99 -ffreestanding -nostdlib
+
+.PHONY: all check prove clean indent rv32i-check
+
+# Compiled search core as one assembly file Ripes can run. -mno-explicit-relocs
+# makes GCC load addresses with la instead of %hi/%lo pairs, because Ripes
+# treats %lo as unsigned and rejects any low part above 2047.
+ripes_main.s: ripes_main.c cube.h search.h pdb.h gcc2ripes.py
+	$(RV_CC) -march=rv32i -mabi=ilp32 -O2 -std=c99 -ffreestanding \
+		-msmall-data-limit=0 -mno-explicit-relocs -S $< -o $@.gcc
+	python3 gcc2ripes.py $@.gcc > $@
+	$(RM) $@.gcc
+
+# Fails with "undefined reference" for every helper the search core needs.
+rv32i-check: rv32i_check.c cube.h search.h pdb.h
+	$(RV_CC) $(RV_CFLAGS) -e solve $< -o /dev/null
 
 all: solver mini
 

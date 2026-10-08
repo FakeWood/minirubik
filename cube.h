@@ -14,35 +14,37 @@ typedef struct {
     uint8_t p[CUBIES], o[CUBIES];
 } state_t;
 
-/* Each destination takes a cubie from source[face][destination]. */
-static const uint8_t source[3][CUBIES] = {
-    {1, 4, 2, 0, 3, 5, 6},
-    {0, 1, 2, 4, 5, 6, 3},
-    {0, 2, 5, 3, 1, 4, 6},
+/* Each destination takes a cubie from source[move][destination] and adds
+ * twist[move][destination] to its orientation. Moves are R R2 R' B B2 B' D D2
+ * D', and each row is its face's quarter turn composed 1, 2 or 3 times, so a
+ * move is one pass over the cubies however many quarter turns it stands for.
+ */
+static const uint8_t source[MOVES][CUBIES] = {
+    {1, 4, 2, 0, 3, 5, 6}, {4, 3, 2, 1, 0, 5, 6}, {3, 0, 2, 4, 1, 5, 6},
+    {0, 1, 2, 4, 5, 6, 3}, {0, 1, 2, 5, 6, 3, 4}, {0, 1, 2, 6, 3, 4, 5},
+    {0, 2, 5, 3, 1, 4, 6}, {0, 5, 4, 3, 2, 1, 6}, {0, 4, 1, 3, 5, 2, 6},
 };
-static const uint8_t twist[3][CUBIES] = {
-    {1, 2, 0, 2, 1, 0, 0},
-    {0, 0, 0, 1, 2, 1, 2},
-    {0, 0, 0, 0, 0, 0, 0},
+static const uint8_t twist[MOVES][CUBIES] = {
+    {1, 2, 0, 2, 1, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {1, 2, 0, 2, 1, 0, 0},
+    {0, 0, 0, 1, 2, 1, 2}, {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 1, 2, 1, 2},
+    {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0},
 };
 
-static state_t quarter_turn(state_t state, uint8_t face)
+/* First move of the face each move turns, for skipping a whole face. */
+static const uint8_t face_start[MOVES] = {0, 0, 0, 3, 3, 3, 6, 6, 6};
+
+static void apply_move(state_t *out, const state_t *in, uint8_t move)
 {
-    state_t result;
+    const uint8_t *src = source[move], *tw = twist[move];
     for (uint8_t i = 0; i < CUBIES; ++i) {
-        uint8_t from = source[face][i];
-        result.p[i] = state.p[from];
-        result.o[i] = (uint8_t) ((state.o[from] + twist[face][i]) % 3U);
+        uint8_t from = src[i];
+        /* Both terms are below 3, so the sum is below 6 and one conditional
+         * subtract replaces % 3: sltiu, neg, andi, sub, and no branch.
+         */
+        uint32_t o = (uint32_t) in->o[from] + tw[i];
+        out->p[i] = in->p[from];
+        out->o[i] = (uint8_t) (o - (3U & -(uint32_t) (o >= 3U)));
     }
-    return result;
-}
-
-static state_t apply_move(state_t state, uint8_t move)
-{
-    uint8_t turns = (uint8_t) (move % 3U + 1U);
-    for (uint8_t i = 0; i < turns; ++i)
-        state = quarter_turn(state, (uint8_t) (move / 3U));
-    return state;
 }
 
 /* Orientations of cubies 0..5 as a base-3 number. The last one is implied by
@@ -50,23 +52,36 @@ static state_t apply_move(state_t state, uint8_t move)
  */
 static uint16_t rank_orient(const state_t *state)
 {
-    uint16_t rank = 0;
+    uint32_t rank = 0;
     for (uint8_t i = 0; i < CUBIES - 1; ++i)
-        rank = (uint16_t) (rank * 3U + state->o[i]);
-    return rank;
+        rank = (rank << 1) + rank + state->o[i]; /* rank * 3 + o[i] */
+    return (uint16_t) rank;
 }
 
-/* Lehmer code of the permutation: 7! = 5040 values. */
+/* Lehmer code of the permutation: 7! = 5040 values.
+ *
+ *     rank = ((((c0 * 6 + c1) * 5 + c2) * 4 + c3) * 3 + c4) * 2 + c5
+ *
+ * ci counts the cubies after position i with a smaller id. The radix shrinks
+ * at every digit, so a loop would multiply by a variable; written out, each
+ * radix is a constant and the multiply becomes shifts and adds.
+ */
 static uint16_t rank_perm(const state_t *state)
 {
-    uint16_t rank = 0;
+    uint8_t c[CUBIES - 1];
     for (uint8_t i = 0; i < CUBIES - 1; ++i) {
         uint8_t smaller = 0;
         for (uint8_t j = (uint8_t) (i + 1); j < CUBIES; ++j)
             smaller = (uint8_t) (smaller + (state->p[j] < state->p[i]));
-        rank = (uint16_t) (rank * (CUBIES - i) + smaller);
+        c[i] = smaller;
     }
-    return rank;
+    uint32_t rank = c[0];
+    rank = (rank << 2) + (rank << 1) + c[1]; /* * 6 */
+    rank = (rank << 2) + rank + c[2];        /* * 5 */
+    rank = (rank << 2) + c[3];               /* * 4 */
+    rank = (rank << 1) + rank + c[4];        /* * 3 */
+    rank = (rank << 1) + c[5];               /* * 2 */
+    return (uint16_t) rank;
 }
 
 /* The cubies that sit on the R face when solved; R cycles exactly these. */
@@ -94,7 +109,8 @@ static uint32_t rank_r_face(const state_t *state)
     for (uint8_t i = 0; i < CUBIES; ++i)
         where[state->p[i]] = i;
 
-    uint32_t place = 0, turned = 0;
+    uint8_t d[4];
+    uint32_t turned = 0;
     for (uint8_t k = 0; k < 4; ++k) {
         uint8_t pos = where[r_cubies[k]];
         /* dk = pos minus the earlier tracked cubies sitting below it, i.e.
@@ -103,10 +119,15 @@ static uint32_t rank_r_face(const state_t *state)
         uint8_t skip = 0;
         for (uint8_t j = 0; j < k; ++j)
             skip = (uint8_t) (skip + (where[r_cubies[j]] < pos));
-        place = place * (CUBIES - k) + (uint32_t) (pos - skip);
-        turned = turned * 3U + state->o[pos];
+        d[k] = (uint8_t) (pos - skip);
+        turned = (turned << 1) + turned + state->o[pos]; /* * 3 */
     }
-    return place * 81U + turned;
+    /* Radices 6, 5, 4 written out as constants, as in rank_perm. */
+    uint32_t place = d[0];
+    place = (place << 2) + (place << 1) + d[1]; /* * 6 */
+    place = (place << 2) + place + d[2];        /* * 5 */
+    place = (place << 2) + d[3];                /* * 4 */
+    return (place << 6) + (place << 4) + place + turned; /* place * 81 */
 }
 
 #endif /* CUBE_H */

@@ -33,14 +33,24 @@ static unsigned long nodes; /* expanded nodes, for measurement */
  * next move to try at each depth. Returns 1 if a solution of exactly `limit`
  * moves exists (stored in path), 0 otherwise.
  */
-static int dls(state_t start, int limit, uint8_t path[MAX_DEPTH])
+static int dls(const state_t *start, int limit, uint8_t path[MAX_DEPTH])
 {
     state_t stack[MAX_DEPTH + 1];
     uint8_t next[MAX_DEPTH + 1];
+    /* skip[d]: first move of the face turned at depth d - 1. Turning the same
+     * face twice in a row cancels or merges into one move, so that face's
+     * three moves are jumped over at once. MOVES at the root skips nothing.
+     */
+    uint8_t skip[MAX_DEPTH + 1];
     int depth = 0;
 
-    stack[0] = start;
+    /* Field by field rather than a struct copy, which may become memcpy. */
+    for (uint8_t i = 0; i < CUBIES; ++i) {
+        stack[0].p[i] = start->p[i];
+        stack[0].o[i] = start->o[i];
+    }
     next[0] = 0;
+    skip[0] = MOVES;
     while (depth >= 0) {
         if (depth == limit) {
             if (is_solved(&stack[depth]))
@@ -48,21 +58,23 @@ static int dls(state_t start, int limit, uint8_t path[MAX_DEPTH])
             --depth;
             continue;
         }
-        if (next[depth] == MOVES) {
+        uint8_t move = next[depth];
+        if (move == skip[depth])
+            move = (uint8_t) (move + 3);
+        if (move >= MOVES) {
             --depth;
             continue;
         }
-        uint8_t move = next[depth]++;
-        /* Same face twice in a row cancels or merges into one move. */
-        if (depth > 0 && move / 3U == path[depth - 1] / 3U)
-            continue;
+        next[depth] = (uint8_t) (move + 1);
         ++nodes;
         path[depth] = move;
-        stack[depth + 1] = apply_move(stack[depth], move);
+        apply_move(&stack[depth + 1], &stack[depth], move);
         /* IDA* cutoff: the child cannot reach solved within the limit. */
         if (depth + 1 + heuristic(&stack[depth + 1]) > limit)
             continue;
-        next[++depth] = 0;
+        ++depth;
+        next[depth] = 0;
+        skip[depth] = face_start[move];
     }
     return 0;
 }
@@ -70,7 +82,7 @@ static int dls(state_t start, int limit, uint8_t path[MAX_DEPTH])
 /* Iterative deepening: try limits 0, 1, ..., MAX_DEPTH. The first limit that
  * succeeds is the shortest solution length, so the result is optimal.
  */
-static int iddfs(state_t start, uint8_t path[MAX_DEPTH])
+static int iddfs(const state_t *start, uint8_t path[MAX_DEPTH])
 {
     for (int limit = 0; limit <= MAX_DEPTH; ++limit)
         if (dls(start, limit, path))

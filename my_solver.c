@@ -43,7 +43,7 @@ int main(int argc, char **argv)
                 argc > 0 && argv[0] ? argv[0] : "my_solver");
         return 2;
     }
-    int length = iddfs(state, path);
+    int length = iddfs(&state, path);
     fprintf(stderr, "nodes: %lu\n", nodes);
     if (length < 0) {
         fputs("no solution within 11 moves\n", stderr);

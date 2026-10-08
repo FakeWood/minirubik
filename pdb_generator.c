@@ -136,7 +136,8 @@ static void build(uint8_t *table, uint32_t size, state_t (*unrank)(uint32_t),
         uint32_t cur = queue[head++];
         state_t state = unrank(cur);
         for (uint8_t move = 0; move < MOVES; ++move) {
-            state_t child = apply_move(state, move);
+            state_t child;
+            apply_move(&child, &state, move);
             uint32_t idx = rank(&child);
             if (table[idx] == UNSEEN) {
                 table[idx] = (uint8_t) (table[cur] + 1);

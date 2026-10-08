@@ -47,11 +47,13 @@ static int check_solve(const state_t *state, uint8_t want, unsigned long *cost)
 {
     uint8_t path[MAX_DEPTH];
     nodes = 0;
-    int length = iddfs(*state, path);
+    int length = iddfs(state, path);
     *cost = nodes;
-    state_t s = *state;
-    for (int i = 0; i < length; ++i)
-        s = apply_move(s, path[i]);
+    state_t s = *state, t;
+    for (int i = 0; i < length; ++i) {
+        apply_move(&t, &s, path[i]);
+        s = t;
+    }
     if (length != want || !is_solved(&s)) {
         fputs("FAIL: ", stderr);
         print_state(stderr, state);
@@ -83,7 +85,8 @@ int main(int argc, char **argv)
         state_t cur = queue[head++];
         uint8_t d = dist[rank_state(&cur)];
         for (uint8_t move = 0; move < MOVES; ++move) {
-            state_t child = apply_move(cur, move);
+            state_t child;
+            apply_move(&child, &cur, move);
             uint32_t idx = rank_state(&child);
             if (dist[idx] == UNSEEN) {
                 dist[idx] = (uint8_t) (d + 1);
