@@ -19,8 +19,6 @@ int main(void)
         acc += rank_perm(x);
 #elif BENCH == 4
         acc += rank_r_face(x);
-#elif BENCH == 5
-        acc += heuristic(x);
 #else
         acc += x->p[0];
 #endif

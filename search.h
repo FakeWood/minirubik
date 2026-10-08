@@ -7,16 +7,21 @@
 #include "cube.h"
 #include "pdb.h"
 
-/* Admissible lower bound: each table is an exact distance in a relaxed
- * problem, so neither exceeds the real distance, and neither does their max.
+/* The IDA* cutoff h(state) > t, where h is the max of the three tables: an
+ * admissible lower bound, since each table is an exact distance in a relaxed
+ * problem (pdb_check.c computes h in full and checks it). h exceeds t as
+ * soon as one of the tables does, so it exceeds t as soon as one of them does, and the rest
+ * need not be ranked. Order by rank cost against cut rate (search_stats):
+ * perm (56 instructions, cuts 55% alone), then r_face (76, 71%), then orient
+ * (38, 31%), which only the nodes passing the first two reach.
  */
-static uint8_t heuristic(const state_t *state)
+static int exceeds(const state_t *state, int t)
 {
-    uint8_t ho = pdb_orient[rank_orient(state)];
-    uint8_t hp = pdb_perm[rank_perm(state)];
-    uint8_t hr = pdb_r_face[rank_r_face(state)];
-    uint8_t h = ho > hp ? ho : hp;
-    return h > hr ? h : hr;
+    if (pdb_perm[rank_perm(state)] > t)
+        return 1;
+    if (pdb_r_face[rank_r_face(state)] > t)
+        return 1;
+    return pdb_orient[rank_orient(state)] > t;
 }
 
 static int is_solved(const state_t *state)
@@ -70,7 +75,7 @@ static int dls(const state_t *start, int limit, uint8_t path[MAX_DEPTH])
         path[depth] = move;
         apply_move(&stack[depth + 1], &stack[depth], move);
         /* IDA* cutoff: the child cannot reach solved within the limit. */
-        if (depth + 1 + heuristic(&stack[depth + 1]) > limit)
+        if (exceeds(&stack[depth + 1], limit - depth - 1))
             continue;
         ++depth;
         next[depth] = 0;

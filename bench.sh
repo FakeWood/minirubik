@@ -28,13 +28,12 @@ retired() {
 base=$(retired 0)
 printf '%-12s %10s %10s\n' function retired per-call
 printf '%-12s %10s %10s\n' baseline "$base" -
-for b in 1 2 3 4 5; do
+for b in 1 2 3 4; do
     case $b in
     1) name=apply_move ;;
     2) name=rank_orient ;;
     3) name=rank_perm ;;
     4) name=rank_r_face ;;
-    5) name=heuristic ;;
     esac
     r=$(retired $b)
     awk -v n="$name" -v r="$r" -v b="$base" -v N="$N" \

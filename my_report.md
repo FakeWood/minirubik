@@ -637,6 +637,60 @@ And the full search on the worst state (`ripes_main.s`, `RV32_ISS`):
 
 The search is unchanged: `pdb.h` regenerates byte for byte, `pdb_check` prints the same output, and Ripes still prints the same 11 moves and 203,475 nodes. Still 1.44× over, so each node has to lose about 110 more instructions.
 
+#### Lazy Cutoff
+
+Currently `dls` computes all three tables and takes the max as h. But it does not need the exact h, only whether h is large enough to cut the child. Since h is the largest of the three, h is large enough as soon as any one table is. So we can look up one table at a time, and once one of them says the child should be cut, skip the others.
+
+This happens a lot: as [Which Table Cuts](#which-table-cuts) shows, 83% of the nodes are cut, most of them by more than one table.
+
+##### Which Table First
+
+The order matters. A table that cuts often saves the later ranks, but a cheap table costs less when it fails. To compare orders, `search_stats` sorts every node by the set of tables that would cut it (8 classes), and from that computes how many times each rank runs in each order. Given the cost per call from `bench.sh` (orient 38, perm 56, r_face 76), it also prints the rank cost per node:
+
+```sh
+./search_stats 54721631111111 38 56 76
+```
+
+```text
+lazy order               rank calls: 1st      2nd      3rd   rank cost per node
+orient  perm    r_face            203475   141399    71279                103.5
+orient  r_face  perm              203475   141399    52503                105.3
+perm    orient  r_face            203475    91634    71279                 99.7
+perm    r_face  orient            203475    91634    38188                 97.4
+r_face  orient  perm              203475    59923    52503                101.6
+r_face  perm    orient            203475    59923    38188                 99.6
+```
+
+perm → r_face → orient is the cheapest, at 97.4 against 170 (38 + 56 + 76) for computing all three. r_face cuts the most (71%) but perm is cheaper, and after perm has cut its 55% only 45% of the nodes still need r_face. orient goes last: it is cheap but cuts the least, and only 19% of the nodes reach it.
+
+The best order depends on the state: for `21345671111111`, r_face → perm → orient is best (98.6, against 102.4 for perm first). The difference is about 2%, and the budget is about the worst state, so we take perm → r_face → orient.
+
+```c
+static int exceeds(const state_t *state, int t)
+{
+    if (pdb_perm[rank_perm(state)] > t)
+        return 1;
+    if (pdb_r_face[rank_r_face(state)] > t)
+        return 1;
+    return pdb_orient[rank_orient(state)] > t;
+}
+```
+
+`dls` calls `exceeds(&stack[depth + 1], limit - depth - 1)` instead of computing `heuristic`. The full $h$ is now only needed by the H1 check, so `heuristic` moved into `pdb_check.c`, and `BENCH=5` was dropped from `bench.c`.
+
+These are branches added on purpose: each one skips at least one rank (38 to 76 instructions) when taken, while the max it replaces cost two compares anyway.
+
+##### Result: Lazy Cutoff
+
+| | retired | per node | vs. budget |
+| --- | ---: | ---: | ---: |
+| ranks unrolled | 72,145,525 | ≈ 355 | 1.44× |
+| lazy cutoff | 52,368,301 | ≈ 257 | 1.05× |
+
+Each node saves about 97 instructions, a bit more than the 73 (170 − 97.4) predicted from the ranks alone, because the three lookups and the two maxes of the full `heuristic` went away too.
+
+`pdb_check` still prints the same output (H1 admissible, all 2,644 distance-11 states solved in 11 moves, max 203,475 nodes): the cutoff decides exactly as before, only with less work. Each node still has to lose about 12 instructions to fit the budget.
+
 ## Stage 4: RV32I Assembly
 
 ### Unsupported Instructions Removed

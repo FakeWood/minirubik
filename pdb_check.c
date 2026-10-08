@@ -27,6 +27,19 @@ static uint32_t rank_state(const state_t *state)
     return (uint32_t) rank_perm(state) * ORIENTS + rank_orient(state);
 }
 
+/* The full h the solver's cutoff (exceeds in search.h) is based on: the max
+ * of the three tables. Each is an exact distance in a relaxed problem, so
+ * neither exceeds the real distance, and neither does their max.
+ */
+static uint8_t heuristic(const state_t *state)
+{
+    uint8_t ho = pdb_orient[rank_orient(state)];
+    uint8_t hp = pdb_perm[rank_perm(state)];
+    uint8_t hr = pdb_r_face[rank_r_face(state)];
+    uint8_t h = ho > hp ? ho : hp;
+    return h > hr ? h : hr;
+}
+
 static void print_state(FILE *out, const state_t *state)
 {
     for (uint8_t i = 0; i < CUBIES; ++i)
