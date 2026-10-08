@@ -731,7 +731,86 @@ A full `apply_move` now costs 164.6 instead of 126.8. Each half is still a loop 
 
 (The baseline rose from 13,620 to 14,988 because `bench.c` scrambles its 16 test states with `apply_move`, which got more expensive. That setup is the same in every build and is subtracted out, so the per-call numbers are not affected.)
 
-So the cost of a move is mostly the loop around it, not the orientation arithmetic. The split only pays off once the loops are gone.
+So the cost of a move is mostly the loop around it, not the orientation arithmetic. The split only pays off once the loops are gone. So the next step is to unroll the loops, and with a `switch` on the move, turn the table entries into constant offsets
+
+#### Write Out Each Move
+
+Unrolling the 7-iteration loop alone removes the counter and the branch, but each cubie would still read `source[move][i]` and add it to the base address, because `move` is a variable. Once the move is known, its row is just 7 fixed numbers. So we `switch` on the move first, and in each of the 9 cases write the row's values straight into the code. For R, whose row is source `1 4 2 0 3 5 6`, twist `1 2 0 2 1 0 0`:
+
+```c
+q[0] = p[1]; q[1] = p[4]; q[2] = p[2]; q[3] = p[0]; q[4] = p[3]; q[5] = p[5]; q[6] = p[6];
+```
+
+Every index is now a constant, so each cubie is one `lbu` and one `sb` with the offset in the instruction itself: no table load, no address add, no counter, no branch. (In `cube.h` the 9 cases are expanded from one-line macros, so each row is still written once.)
+
+| per cubie | instructions |
+| --- | ---: |
+| loop | 7 (table load, address add, `lbu`, `sb`, 2 pointer increments, branch) |
+| unrolled, still reading the table | 4 |
+| written out per move | 2 |
+
+The orientations get the same treatment, and the constant twist helps further:
+
+##### Twist 0: a Plain Copy
+
+A twist of 0 means the cubie keeps its orientation, so the new value is just the parent's: `q[i] = o[s]`, one `lbu` and one `sb`, with no add and no mod 3. 
+
+Most moves are twist 0 everywhere:
+
+| move | twist | cubies twisted |
+| --- | --- | ---: |
+| R, R' | 1 2 0 2 1 0 0 | 4 |
+| B, B' | 0 0 0 1 2 1 2 | 4 |
+| R2, B2 | 0 0 0 0 0 0 0 | 0 |
+| D, D2, D' | 0 0 0 0 0 0 0 | 0 |
+
+- D, D2 and D' twist nothing because orientation is measured against the U/D axis, and a D turn keeps every cubie's U/D sticker on the D face.
+- R2 and B2 twist nothing because two quarter turns add up the twists of both, and for each cubie the two add up to a multiple of 3.
+- R, R', B and B' twist only the 4 cubies on the turned face; the other 3 do not move at all.
+
+So 5 of the 9 moves are 7 plain copies, and the other 4 still copy 3 of their 7 cubies.
+
+##### Twist 1 or 2: a Lookup
+
+For the twisted cubies we need $(o + t) \bmod 3$. $o$ and $t$ are both in $\{0, 1, 2\}$, so there are only 9 possible results, and we store them in a 9-byte table instead of computing them:
+
+```c
+static const uint8_t plus[3][3] = {{0, 1, 2}, {1, 2, 0}, {2, 0, 1}};
+/* plus[t][o] = (o + t) mod 3 */
+```
+
+Because the move is written out, $t$ is a constant, so row $t$ starts at the constant offset $3t$ from `plus`, which goes straight into the load:
+
+```asm
+    add   a4,a5,a4        # a5 = plus, a4 = o
+    lbu   a4,3(a4)        # plus[1][o]: offset 3 selects row 1
+```
+
+That is 2 instructions per twisted cubie (plus the `lbu` and `sb` of every cubie), against about 4 for the conditional subtract (`sltiu`, `sub`, `andi`, `sub`) after adding $t$. The address of `plus` is loaded once per call. In the loop version the lookup did not pay: $t$ came from `twist[move][i]`, so finding row $t$ needed another load and $3t$ computed with a shift and an add.
+
+##### The Jump Table
+
+The `switch` compiles to a jump table, which costs a range check, a load and a `jr` per call, a few instructions against the 7 loop iterations it removes. The `source` and `twist` tables are gone; their values now live in the code and in a comment table in `cube.h`.
+
+##### Result: Written-out Moves
+
+| `BENCH` | per call before | per call after |
+| --- | ---: | ---: |
+| 1 `apply_move` (both halves) | 164.6 | **62.1** |
+| 2 `rank_orient` | 38.0 | 38.0 |
+| 3 `rank_perm` | 56.0 | 56.0 |
+| 4 `rank_r_face` | 76.0 | 76.0 |
+
+| | retired | per node | vs. budget |
+| --- | ---: | ---: | ---: |
+| lazy orientations | 51,594,470 | ≈ 254 | 1.03× |
+| written-out moves | **32,582,677** | ≈ 160 | **0.65×** |
+
+Each node saves about 94 instructions, and now the split from [Lazy Orientations](#lazy-orientations) pays off as well: the 55% of the nodes that perm cuts skip the whole `move_orient`, with no loop overhead left to pay for the other 45%.
+
+`pdb.h` still regenerates byte for byte, which exercises all 9 cases of both functions in the BFS, and `pdb_check` prints the same output. The worst state now fits the budget with 35% to spare.
+
+It's time to write the assembly code.
 
 ## Stage 4: RV32I Assembly
 

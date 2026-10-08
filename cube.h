@@ -14,48 +14,107 @@ typedef struct {
     uint8_t p[CUBIES], o[CUBIES];
 } state_t;
 
-/* Each destination takes a cubie from source[move][destination] and adds
- * twist[move][destination] to its orientation. Moves are R R2 R' B B2 B' D D2
- * D', and each row is its face's quarter turn composed 1, 2 or 3 times, so a
- * move is one pass over the cubies however many quarter turns it stands for.
- */
-static const uint8_t source[MOVES][CUBIES] = {
-    {1, 4, 2, 0, 3, 5, 6}, {4, 3, 2, 1, 0, 5, 6}, {3, 0, 2, 4, 1, 5, 6},
-    {0, 1, 2, 4, 5, 6, 3}, {0, 1, 2, 5, 6, 3, 4}, {0, 1, 2, 6, 3, 4, 5},
-    {0, 2, 5, 3, 1, 4, 6}, {0, 5, 4, 3, 2, 1, 6}, {0, 4, 1, 3, 5, 2, 6},
-};
-static const uint8_t twist[MOVES][CUBIES] = {
-    {1, 2, 0, 2, 1, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {1, 2, 0, 2, 1, 0, 0},
-    {0, 0, 0, 1, 2, 1, 2}, {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 1, 2, 1, 2},
-    {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0},
-};
-
 /* First move of the face each move turns, for skipping a whole face. */
 static const uint8_t face_start[MOVES] = {0, 0, 0, 3, 3, 3, 6, 6, 6};
 
 /* A move in two halves, so the search can stop after the permutation when
  * the permutation table alone already cuts the child.
+ *
+ * Moves are R R2 R' B B2 B' D D2 D'. Destination i takes the cubie from
+ * source position s and adds a twist t to its orientation; each move is its
+ * face's quarter turn composed 1, 2 or 3 times:
+ *
+ *     move  source         twist
+ *     R     1 4 2 0 3 5 6  1 2 0 2 1 0 0
+ *     R2    4 3 2 1 0 5 6  0 0 0 0 0 0 0
+ *     R'    3 0 2 4 1 5 6  1 2 0 2 1 0 0
+ *     B     0 1 2 4 5 6 3  0 0 0 1 2 1 2
+ *     B2    0 1 2 5 6 3 4  0 0 0 0 0 0 0
+ *     B'    0 1 2 6 3 4 5  0 0 0 1 2 1 2
+ *     D     0 2 5 3 1 4 6  0 0 0 0 0 0 0
+ *     D2    0 5 4 3 2 1 6  0 0 0 0 0 0 0
+ *     D'    0 4 1 3 5 2 6  0 0 0 0 0 0 0
+ *
+ * A loop over these tables pays a counter, a branch, a table load and an
+ * address add per cubie. Instead each move is written out with its sources
+ * and twists as constants: copying a cubie is one lbu and one sb at fixed
+ * offsets, and only the cubies with a non-zero twist do more.
  */
+#define PERM(a, b, c, d, e, f, g)                                              \
+    (q[0] = p[a], q[1] = p[b], q[2] = p[c], q[3] = p[d], q[4] = p[e],          \
+     q[5] = p[f], q[6] = p[g])
+
 static void move_perm(state_t *out, const state_t *in, uint8_t move)
 {
-    const uint8_t *src = source[move];
-    for (uint8_t i = 0; i < CUBIES; ++i)
-        out->p[i] = in->p[src[i]];
-}
-
-static void move_orient(state_t *out, const state_t *in, uint8_t move)
-{
-    const uint8_t *src = source[move], *tw = twist[move];
-    for (uint8_t i = 0; i < CUBIES; ++i) {
-        /* Both terms are below 3, so the sum is below 6 and one conditional
-         * subtract replaces % 3: sltiu, neg, andi, sub, and no branch.
-         */
-        uint32_t o = (uint32_t) in->o[src[i]] + tw[i];
-        out->o[i] = (uint8_t) (o - (3U & -(uint32_t) (o >= 3U)));
+    const uint8_t *p = in->p;
+    uint8_t *q = out->p;
+    switch (move) {
+    case 0: PERM(1, 4, 2, 0, 3, 5, 6); break; /* R  */
+    case 1: PERM(4, 3, 2, 1, 0, 5, 6); break; /* R2 */
+    case 2: PERM(3, 0, 2, 4, 1, 5, 6); break; /* R' */
+    case 3: PERM(0, 1, 2, 4, 5, 6, 3); break; /* B  */
+    case 4: PERM(0, 1, 2, 5, 6, 3, 4); break; /* B2 */
+    case 5: PERM(0, 1, 2, 6, 3, 4, 5); break; /* B' */
+    case 6: PERM(0, 2, 5, 3, 1, 4, 6); break; /* D  */
+    case 7: PERM(0, 5, 4, 3, 2, 1, 6); break; /* D2 */
+    default: PERM(0, 4, 1, 3, 5, 2, 6); break; /* D' */
     }
 }
 
-static void apply_move(state_t *out, const state_t *in, uint8_t move)
+/* plus[t][o] = (o + t) mod 3. With t a constant, one add for the address
+ * and one lbu replace the sltiu, neg, andi, sub of a conditional subtract.
+ */
+static const uint8_t plus[3][3] = {{0, 1, 2}, {1, 2, 0}, {2, 0, 1}};
+
+/* T0 copies an orientation; T1 and T2 add a twist of 1 or 2. */
+#define T0(i, s) (q[i] = o[s])
+#define T1(i, s) (q[i] = plus[1][o[s]])
+#define T2(i, s) (q[i] = plus[2][o[s]])
+
+static void move_orient(state_t *out, const state_t *in, uint8_t move)
+{
+    const uint8_t *o = in->o;
+    uint8_t *q = out->o;
+    switch (move) {
+    case 0: /* R */
+        T1(0, 1), T2(1, 4), T0(2, 2), T2(3, 0), T1(4, 3), T0(5, 5), T0(6, 6);
+        break;
+    case 1: /* R2 */
+        T0(0, 4), T0(1, 3), T0(2, 2), T0(3, 1), T0(4, 0), T0(5, 5), T0(6, 6);
+        break;
+    case 2: /* R' */
+        T1(0, 3), T2(1, 0), T0(2, 2), T2(3, 4), T1(4, 1), T0(5, 5), T0(6, 6);
+        break;
+    case 3: /* B */
+        T0(0, 0), T0(1, 1), T0(2, 2), T1(3, 4), T2(4, 5), T1(5, 6), T2(6, 3);
+        break;
+    case 4: /* B2 */
+        T0(0, 0), T0(1, 1), T0(2, 2), T0(3, 5), T0(4, 6), T0(5, 3), T0(6, 4);
+        break;
+    case 5: /* B' */
+        T0(0, 0), T0(1, 1), T0(2, 2), T1(3, 6), T2(4, 3), T1(5, 4), T2(6, 5);
+        break;
+    case 6: /* D */
+        T0(0, 0), T0(1, 2), T0(2, 5), T0(3, 3), T0(4, 1), T0(5, 4), T0(6, 6);
+        break;
+    case 7: /* D2 */
+        T0(0, 0), T0(1, 5), T0(2, 4), T0(3, 3), T0(4, 2), T0(5, 1), T0(6, 6);
+        break;
+    default: /* D' */
+        T0(0, 0), T0(1, 4), T0(2, 1), T0(3, 3), T0(4, 5), T0(5, 2), T0(6, 6);
+        break;
+    }
+}
+
+#undef PERM
+#undef T0
+#undef T1
+#undef T2
+
+/* Both halves, for the host tools that need whole moves. inline, so files
+ * that only use the halves do not warn that it is unused.
+ */
+static inline void apply_move(state_t *out, const state_t *in, uint8_t move)
 {
     move_perm(out, in, move);
     move_orient(out, in, move);

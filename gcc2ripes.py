@@ -8,6 +8,8 @@ directives. This script:
     starts executing at the first instruction of .text;
   - maps every code section to .text and every data section to .data;
   - rewrites .ascii/.string as .byte, since GCC packs byte tables as strings;
+  - renames local labels .Lxxx to L_xxx, since Ripes takes a leading "."
+    in an operand (such as a jump table's .word .L19) for a directive;
   - turns section anchors (.set .LANCHORn,. + 0) into plain labels;
   - replaces .align in .data by explicit .zero padding;
   - drops directives Ripes does not know (.file, .type, .size, ...).
@@ -50,6 +52,11 @@ def main(path):
     offset = 0  # bytes emitted to .data so far, for .align
     for raw in lines:
         line = raw.strip()
+        # Ripes reads any token starting with "." as a directive, so a local
+        # label used as an operand (.word .L19 in a switch jump table) fails.
+        # Rename GCC's .Lxxx labels; string bodies are left alone.
+        if not re.match(r"\.(ascii|string)\b", line):
+            line = re.sub(r"(?<![\w.])\.L(\w+)", r"L_\1", line)
         if not line:
             continue
         word = line.split()[0]
