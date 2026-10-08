@@ -753,7 +753,7 @@ The orientations get the same treatment, and the constant twist helps further:
 
 ##### Twist 0: a Plain Copy
 
-A twist of 0 means the cubie keeps its orientation, so the new value is just the parent's: `q[i] = o[s]`, one `lbu` and one `sb`, with no add and no mod 3. 
+A twist of 0 means the cubie keeps its orientation, so the new value is just the parent's: `q[i] = o[s]`, one `lbu` and one `sb`, with no add and no mod 3.
 
 Most moves are twist 0 everywhere:
 
@@ -857,14 +857,161 @@ The moves are B2 R' B R' D' B R2 B R B D', the same as the host solver, and the 
 
 Removing the helpers is not enough: the search is still about 2.5× over the budget, so each node has to drop from about 620 to under 245 instructions.
 
-## Concept
+### Efficiency Improved
 
-## Implementation
+After the Stage 3 optimizations, the same `make ripes_main.s` run gives:
 
-### C code
+| | retired | per node | vs. budget |
+| --- | ---: | ---: | ---: |
+| helpers removed | 126,147,427 | ≈ 620 | 2.52× |
+| ranks unrolled | 72,145,525 | ≈ 355 | 1.44× |
+| lazy cutoff | 52,368,301 | ≈ 257 | 1.05× |
+| lazy orientations | 51,594,470 | ≈ 254 | 1.03× |
+| written-out moves | 32,582,677 | ≈ 160 | 0.65× |
 
-### Assembly code
+So the C version already fits. The hand-written assembly follows the same structure, so it can be checked against the C line by line.
 
-## Analysis
+### Hand-written Assembly
 
-## Reference
+`my_solver.s` is the solver in RV32I assembly for Ripes. It runs the same search as `search.h`: iterative deepening, the explicit-stack `dls`, the written-out moves, the lazy cutoff perm → r_face → orient, and the unrolled ranks. Line numbers (L) below refer to `my_solver.s`.
+
+#### Code Map
+
+| part | C counterpart | lines |
+| --- | --- | --- |
+| layout and register comments | | L1–36 |
+| base registers | | L39–45 |
+| `parse`: input string into `stack[0]` | `parse_state` | L47–62 |
+| `deepen`: start a limit | `iddfs` | L64–72 |
+| `loop`: next move, face skip | `dls` | L74–86 |
+| `move_perm` dispatch | `move_perm` | L88–93 |
+| `rank_perm` and its cutoff | `rank_perm` | L95–150 |
+| `move_orient` dispatch | `move_orient` | L152–158 |
+| `rank_r_face` and its cutoff | `rank_r_face` | L160–233 |
+| `rank_orient` and its cutoff | `rank_orient` | L235–259 |
+| descend | `dls` | L261–269 |
+| `pop`, next limit | `dls`, `iddfs` | L271–282 |
+| `at_limit`: goal test | `is_solved` | L284–296 |
+| print the solution | `main` | L298–326 |
+| T5: replay the path, check solved | `pdb_check.c` step 3 | L328–412 |
+| exit | | L413–415 |
+| `print_str` | | L417–429 |
+| 9 `perm_*` blocks | `move_perm` cases | L431–584 |
+| 9 `orient_*` blocks | `move_orient` cases | L586–769 |
+| `stack`, `chk`, `tmp`, block `D`, jump tables | | L772–805 |
+| `input` | | L807–812 |
+| `names`, messages, `qt_src`, `qt_tw` | | L814–850 |
+| `pdb_perm`, `pdb_r_face`, `pdb_orient` | `pdb.h` | L852–3933 |
+
+#### Memory Layout
+
+Everything lives in `.data`; there is no heap and no recursion.
+
+| data | bytes | contents |
+| --- | ---: | --- |
+| `stack` (L775) | 192 | 12 state slots of 16 bytes, one per depth 0..11 |
+| `chk`, `tmp` (L777–780) | 32 | T5 replay state and scratch, same layout as a slot |
+| `D` (L781) | 168 | per-depth arrays, small tables and jump tables (below) |
+| `input`, `names`, messages (L811–840) | 118 | the state string, the 9 move names, output text |
+| `qt_src`, `qt_tw` (L843–850) | 42 | quarter turns R, B, D for the T5 replay |
+| `pdb_perm` (L853) | 5,040 | |
+| `pdb_r_face` (L1065) | 68,040 | |
+| `pdb_orient` (L3902) | 729 | |
+| total | 74,361 | 72.6 KiB, under 128 KiB |
+
+A state slot (described at L13–19) is `p[0..6]` at offsets 0..6 and `o[0..6]` at 8..14, with the bytes at 7 and 15 left at 0. 16 bytes per slot make a slot address a shift away, and the child of the slot at `s2` is always the next one, so its `p` is at `16(s2)` and its `o` at `24(s2)`.
+
+Block `D` (described at L21–29, defined at L781–805) keeps every small table at a fixed offset from one base register `s3`, so any of them is one `lbu` (with an `add` for a variable index) and no `la`:
+
+| offset | contents |
+| ---: | --- |
+| 0 | `next[12]` |
+| 16 | `skip[12]` |
+| 32 | `path[12]` |
+| 48 | `plus[3][3]` (L783) |
+| 64 | `face_start[9]` (L785) |
+| 80 | `where[8]`, scratch for `rank_r_face` (L787) |
+| 96 | `jt_perm[9]`, the `move_perm` block of each move (L788–796) |
+| 132 | `jt_orient[9]`, the `move_orient` block of each move (L797–805) |
+
+#### Registers
+
+The register plan is also in the comment at L31–36.
+
+| register | use |
+| --- | --- |
+| `s0` | limit |
+| `s2` | `&stack[depth]`, the parent |
+| `s3` | block `D` |
+| `s4`, `s5`, `s6` | `pdb_perm`, `pdb_r_face`, `pdb_orient` |
+| `s7` | $t = \text{limit} - \text{depth} - 1$, the cutoff threshold |
+| `s8` | `D + depth`, so `next[depth]`, `skip[depth]`, `path[depth]` are `0(s8)`, `16(s8)`, `32(s8)` |
+| `s9` | node count, printed for checking against the host |
+| `s10` | 9, the number of moves |
+| `a0` | the current move |
+| `t0`..`t6` | the child's `p[0..6]` after `move_perm` |
+
+The depth itself is never stored. In `dls`, the depth is only used for these, and each has a register that replaces it:
+
+| use of depth | in C | in assembly |
+| --- | --- | --- |
+| the parent's state | `stack[depth]` = `stack` + 16 × depth | `s2` |
+| this depth's `next`, `skip`, `path` | `next[depth]` = `D` + depth | `s8` |
+| the cutoff threshold | $t = \text{limit} - \text{depth} - 1$ | `s7` |
+| reached the limit? | `depth == limit` | `s7 < 0` |
+| still in the tree after a pop? | `depth >= 0` | `s7 < limit` |
+
+`s2`, `s8` and `s7` all change by a constant when the depth changes by one:
+
+| register | as a function of depth | when depth + 1 |
+| --- | --- | --- |
+| `s2` | `stack` + 16 × depth | + 16 |
+| `s8` | `D` + depth | + 1 |
+| `s7` | limit − depth − 1 | − 1 |
+
+So descending is `addi s2, s2, 16`, `addi s8, s8, 1`, `addi s7, s7, -1` (L262–264), popping is the reverse (L272–274), and the three always hold what they would be computed from the depth. The two tests follow from $t = \text{limit} - \text{depth} - 1$:
+
+- depth = limit $\iff$ $t = -1$ $\iff$ $t < 0$ (`bltz s7`, L76)
+- depth ≥ 0 $\iff$ $t \le \text{limit} - 1$ $\iff$ $t < \text{limit}$ (`blt s7, s0`, L275)
+
+Keeping the depth instead would cost a register, and every access would compute its address from it again: a `slli` by 4 and an `add` for `stack[depth]`, an `add` for `next[depth]`. With the three registers maintained directly, a level costs 3 `addi` and every access uses a constant offset.
+
+#### What Differs from GCC's Version
+
+- **The child's `p` stays in registers.** Each `move_perm` block (e.g. `perm_R`, L433–448) loads the 7 cubies into `t0`..`t6` before storing them, and those registers are the child's `p[0..6]`. `rank_perm` compares them directly instead of reloading 7 bytes, and `rank_r_face` builds `where[]` from them too (L161–180). The `move_orient` blocks only use `a1`..`a7`, so `t0`..`t6` survive until `rank_r_face`.
+- **The rank digits go straight into the Horner sum.** In `rank_perm` (L95–150), each `sltu` result is added into the running rank right after it is multiplied by the next radix, so no digit needs its own register.
+- **Loads come before their uses.** A move block (e.g. `orient_R`, L586–609) loads all 7 values before storing any, so no `sb` waits on the `lbu` right before it. This does not change the instruction count, but it avoids load-use stalls on the pipelined models.
+- **One base register for all small tables.** `s3` plus a constant offset (e.g. `lbu a1, 64(a1)` for `face_start`, L267) replaces a `la` (2 instructions) each time a table is used.
+- **Pointers, not indices.** `s2`, `s8` and `s7` move by constants, so no slot or array address is recomputed from the depth.
+
+The 18 move blocks and the PDB `.byte` lines are generated by a script from the source/twist table in `cube.h` and from `pdb.h`, so that none of the 63 source/twist pairs or 73,809 table bytes is copied by hand. The rest is written by hand.
+
+#### Ripes Quirks
+
+- `.equ` symbols used as a load/store offset give a wrong address: `sb t0, OFF(s3)` with `.equ OFF, 4` did not touch `4(s3)`. Every offset is therefore a literal, documented in the layout tables at the top of the file.
+- `.data` has to come after `.text` (L774): `.word perm_R` in a jump table fails with "Unknown symbol" if the label has not been seen yet.
+- The print-string `ecall` (4) also prints the terminating NUL, which shows up as an extra space. `print_str` (L417–429) prints one character at a time with `ecall` 11 instead.
+
+#### Result
+
+Each state is put into `input` (L812), run on Ripes, and compared with `my_solver.exe` (moves and node count):
+
+| state | moves | nodes | `RV32_ISS` retired |
+| --- | ---: | ---: | ---: |
+| `12345671111111` (solved) | 0 | 0 | 338 |
+| `62345713133111` | 8 | 106 | 15,218 |
+| `25713642221111` | 8 | 156 | 22,932 |
+| `24316572122213` | 8 | 238 | 32,924 |
+| `43752611332133` | 9 | 612 | 89,254 |
+| `24513763133333` | 9 | 1,825 | 255,406 |
+| `25416373331111` | 10 | 6,233 | 898,948 |
+| `21345671111111` (T6) | 11 | 34,563 | 4,720,341 |
+| `54721631111111` (worst) | 11 | 203,475 | **26,494,432** |
+
+All 9 match the host exactly and print `verify: solved`. The worst state takes about 130 instructions per node, 0.53× the budget, and 19% fewer than GCC's 32,582,677 for the same search.
+
+The program checks its own answer (T5, L328–412) instead of leaving it to a manual comparison. After printing, it parses `input` again into `chk`, replays `path[0..limit-1]` on it, and runs the same four-word solved test as `at_limit`, printing `verify: solved` or `verify: FAIL`. The replay does not reuse the search's code: each move is its face's quarter turn from `qt_src`/`qt_tw` (the R, B, D rows of the table in `cube.h`) applied 1, 2 or 3 times in a loop, with a conditional subtract for mod 3. A bug in a written-out move block or in a generated table row therefore shows up as a mismatch, not as the same wrong state twice. Changing one twist row of `qt_tw` on purpose makes T6 print `verify: FAIL`. The check runs once, at most 11 × 3 quarter turns, and adds 176 retired instructions for the solved state and 2,881 for the worst state.
+
+On the pipelined `RV32_5S`, T6 prints the same output with 4,720,340 retired instructions in 5,250,313 cycles, a CPI of about 1.11, and also prints `verify: solved`.
+
+No instruction outside RV32I appears in the file (no `mul`, `div`, `rem`, no compressed or floating-point instructions), and nothing calls a helper.
