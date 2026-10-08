@@ -56,7 +56,7 @@ static int dls_stats(const state_t *start, int limit, uint8_t path[MAX_DEPTH])
         ++nodes;
         path[depth] = move;
         apply_move(&stack[depth + 1], &stack[depth], move);
-        /* Same cutoff as exceeds(): max of the three exceeds t iff at least
+        /* Same cutoff as move_and_cut(): max of the three exceeds t iff at least
          * one of them does.
          */
         const state_t *child = &stack[depth + 1];

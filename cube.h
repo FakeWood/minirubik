@@ -33,18 +33,32 @@ static const uint8_t twist[MOVES][CUBIES] = {
 /* First move of the face each move turns, for skipping a whole face. */
 static const uint8_t face_start[MOVES] = {0, 0, 0, 3, 3, 3, 6, 6, 6};
 
-static void apply_move(state_t *out, const state_t *in, uint8_t move)
+/* A move in two halves, so the search can stop after the permutation when
+ * the permutation table alone already cuts the child.
+ */
+static void move_perm(state_t *out, const state_t *in, uint8_t move)
+{
+    const uint8_t *src = source[move];
+    for (uint8_t i = 0; i < CUBIES; ++i)
+        out->p[i] = in->p[src[i]];
+}
+
+static void move_orient(state_t *out, const state_t *in, uint8_t move)
 {
     const uint8_t *src = source[move], *tw = twist[move];
     for (uint8_t i = 0; i < CUBIES; ++i) {
-        uint8_t from = src[i];
         /* Both terms are below 3, so the sum is below 6 and one conditional
          * subtract replaces % 3: sltiu, neg, andi, sub, and no branch.
          */
-        uint32_t o = (uint32_t) in->o[from] + tw[i];
-        out->p[i] = in->p[from];
+        uint32_t o = (uint32_t) in->o[src[i]] + tw[i];
         out->o[i] = (uint8_t) (o - (3U & -(uint32_t) (o >= 3U)));
     }
+}
+
+static void apply_move(state_t *out, const state_t *in, uint8_t move)
+{
+    move_perm(out, in, move);
+    move_orient(out, in, move);
 }
 
 /* Orientations of cubies 0..5 as a base-3 number. The last one is implied by

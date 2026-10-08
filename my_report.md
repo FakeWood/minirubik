@@ -691,6 +691,48 @@ Each node saves about 97 instructions, a bit more than the 73 (170 − 97.4) pre
 
 `pdb_check` still prints the same output (H1 admissible, all 2,644 distance-11 states solved in 11 moves, max 203,475 nodes): the cutoff decides exactly as before, only with less work. Each node still has to lose about 12 instructions to fit the budget.
 
+#### Lazy Orientations
+
+`rank_perm`, the first table in the cutoff, only reads `p[]`. So for the 55% of the nodes that perm cuts, the new `o[]` that `apply_move` computes is never read, and `o[]` is the expensive half of a move: a load of the twist and a mod 3 for every cubie.
+
+So we split `apply_move` into `move_perm` and `move_orient`, and move the orientations only after perm has not cut. `exceeds` becomes `move_and_cut`, which applies the move itself:
+
+```c
+static int move_and_cut(state_t *child, const state_t *parent, uint8_t move, int t)
+{
+    move_perm(child, parent, move);
+    if (pdb_perm[rank_perm(child)] > t)
+        return 1;
+    move_orient(child, parent, move);
+    if (pdb_r_face[rank_r_face(child)] > t)
+        return 1;
+    return pdb_orient[rank_orient(child)] > t;
+}
+```
+
+##### Result: Lazy Orientations
+
+| | retired | per node | vs. budget |
+| --- | ---: | ---: | ---: |
+| lazy cutoff | 52,368,301 | ≈ 257 | 1.05× |
+| lazy orientations | 51,594,470 | ≈ 254 | 1.03× |
+
+Only about 4 instructions per node, far from what skipping half of the moves suggests. `bench.sh` shows why:
+
+| `BENCH` | retired | per call | before the split |
+| --- | ---: | ---: | ---: |
+| 0 baseline | 14,988 | — | (13,620) |
+| 1 `apply_move` | 183,540 | **164.6** | 126.8 |
+| 2 `rank_orient` | 53,904 | 38.0 | 38.0 |
+| 3 `rank_perm` | 72,332 | 56.0 | 56.0 |
+| 4 `rank_r_face` | 92,828 | 76.0 | 76.0 |
+
+A full `apply_move` now costs 164.6 instead of 126.8. Each half is still a loop over 7 cubies, so the loop overhead (counter, branch, loading `source[move][i]`, address arithmetic) is paid twice. The 55% of the nodes that skip `move_orient` save that loop, but the other 45% pay an extra one, and the two almost cancel out.
+
+(The baseline rose from 13,620 to 14,988 because `bench.c` scrambles its 16 test states with `apply_move`, which got more expensive. That setup is the same in every build and is subtracted out, so the per-call numbers are not affected.)
+
+So the cost of a move is mostly the loop around it, not the orientation arithmetic. The split only pays off once the loops are gone.
+
 ## Stage 4: RV32I Assembly
 
 ### Unsupported Instructions Removed

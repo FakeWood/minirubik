@@ -6,290 +6,172 @@ _start:
 main:
     addi	sp,sp,-288
     la	a5,.LANCHOR0
-    sw	s3,272(sp)
-    sw	s7,256(sp)
-    lw	s3,0(a5)
-    li	s7,17170432
+    sw	s9,248(sp)
+    lw	s9,0(a5)
     li	a5,65536
-    li	a2,131072
-    addi	s7,s7,772
+    li	a4,17170432
+    li	a0,131072
     addi	a5,a5,-1
-    sw	s2,276(sp)
+    sw	s1,280(sp)
     sw	s4,268(sp)
+    sw	s8,252(sp)
+    sw	s10,244(sp)
+    sw	s0,284(sp)
+    sw	s2,276(sp)
+    sw	s3,272(sp)
     sw	s5,264(sp)
     sw	s6,260(sp)
-    sw	s8,252(sp)
+    sw	s7,256(sp)
     sw	s11,240(sp)
-    sw	s0,284(sp)
-    sw	s1,280(sp)
-    sw	s9,248(sp)
-    sw	s10,244(sp)
-    li	a0,0
-    li	t0,0
-    addi	a2,a2,1280
-    li	s8,9
-    li	s4,8
-    la	s2,.LANCHOR1
-    la	s6,.LANCHOR1+64
-    la	s5,pdb_perm
-    li	t2,7
-    la	s11,pdb_r_face
+    li	a6,0
+    li	s1,0
+    addi	a4,a4,772
+    addi	a0,a0,1280
+    li	s8,-1
+    li	s10,8
+    li	s4,7
     sw	a5,12(sp)
-    mv	a1,s7
 .L2:
-    sw	a1,72(sp)
-    sw	a2,76(sp)
+    slli	s5,s1,3
+    sub	s5,s5,s1
+    li	a5,9
+    sw	a4,72(sp)
+    sw	a0,76(sp)
     sw	zero,80(sp)
     sh	zero,84(sp)
     sb	zero,48(sp)
-    sb	s8,60(sp)
-    li	a5,0
-    li	s7,-1
-.L17:
-    beq	a5,t0,.L41
+    sb	a5,60(sp)
+    li	a3,0
+    slli	s5,s5,1
+.L18:
+    beq	s1,a3,.L43
 .L3:
-    addi	a4,a5,224
-    addi	a3,sp,16
-    add	a3,a4,a3
-    lbu	a4,-192(a3)
-    lbu	a6,-180(a3)
-    beq	a6,a4,.L42
-    bgtu	a4,s4,.L39
+    addi	a5,a3,224
+    addi	a2,sp,16
+    add	t1,a5,a2
+    lbu	a1,-192(t1)
+    lbu	a5,-180(t1)
+    beq	a5,a1,.L44
+    bgtu	a1,s10,.L41
 .L9:
-    addi	s1,a5,1
-    slli	a0,s1,3
-    sub	a0,a0,s1
-    slli	t5,a5,3
-    slli	a0,a0,1
-    slli	t3,a4,3
-    sub	t5,t5,a5
+    addi	s6,a3,1
+    slli	a2,s6,3
+    slli	a6,a3,3
+    sub	a2,a2,s6
+    slli	a2,a2,1
+    sub	t5,a6,a3
+    slli	a5,a1,3
+    sw	a6,8(sp)
     addi	a6,sp,72
-    add	a6,a6,a0
-    sub	t3,t3,a4
+    add	a7,a6,a2
+    addi	t3,a1,1
     slli	t5,t5,1
-    sw	a0,8(sp)
-    addi	a0,a4,1
-    add	a7,s2,t3
-    sb	a0,-192(a3)
-    sb	a4,-204(a3)
-    addi	t4,sp,16
-    addi	a3,t5,224
-    addi	s3,s3,1
-    add	t3,s6,t3
-    mv	a0,a6
-    addi	t6,a7,7
-    mv	t1,a6
-    add	t5,a3,t4
-.L12:
-    lbu	t4,0(a7)
-    lbu	s0,0(t3)
-    addi	a7,a7,1
-    add	t4,t5,t4
-    lbu	a3,-161(t4)
-    lbu	s9,-168(t4)
-    li	t4,0
-    add	a3,a3,s0
-    sb	s9,0(t1)
-    sltiu	s0,a3,3
-    bne	s0,zero,.L11
-    li	t4,3
-.L11:
-    sub	a3,a3,t4
-    sb	a3,7(t1)
-    addi	t3,t3,1
-    addi	t1,t1,1
-    bne	t6,a7,.L12
-    lbu	t6,1(a6)
-    lbu	t5,2(a6)
-    lbu	s0,0(a6)
-    lbu	t4,3(a6)
-    lbu	t3,4(a6)
-    lbu	t1,5(a6)
-    sltu	s9,t5,s0
-    sltu	a3,t6,s0
-    lbu	a7,6(a6)
-    add	a3,a3,s9
-    sltu	a6,t4,s0
-    add	a3,a3,a6
-    sltu	a6,t3,s0
-    add	a3,a3,a6
-    sltu	a6,t1,s0
-    add	a3,a3,a6
-    sltu	s10,a7,s0
-    sltu	s9,t4,t6
-    sltu	a6,t5,t6
-    add	a3,a3,s10
-    add	a6,a6,s9
-    sltu	s9,t3,t6
-    slli	s10,a3,1
-    add	a6,a6,s9
-    sltu	s9,t1,t6
-    add	a6,a6,s9
-    add	a3,s10,a3
-    sltu	s10,a7,t6
-    add	s10,a6,s10
-    sltu	s9,t3,t5
-    slli	a3,a3,1
+    sw	a2,4(sp)
+    sub	a5,a5,a1
+    la	a2,.LANCHOR1
+    add	a2,a2,a5
+    sub	a6,s1,a3
+    sb	t3,-192(t1)
+    addi	t3,t5,224
+    addi	t5,sp,16
+    sb	a1,-204(t1)
+    addi	s2,a6,-1
+    addi	s9,s9,1
+    mv	s0,a7
+    addi	t1,a2,7
+    mv	t4,a7
+    mv	a6,a2
+    add	t5,t3,t5
+.L10:
+    lbu	t3,0(a6)
+    addi	t4,t4,1
+    addi	a6,a6,1
+    add	t3,t5,t3
+    lbu	t3,-168(t3)
+    sb	t3,-1(t4)
+    bne	t1,a6,.L10
+    lbu	t2,0(a7)
+    lbu	a6,1(a7)
+    lbu	t6,2(a7)
+    lbu	t5,3(a7)
+    lbu	t4,4(a7)
+    lbu	t3,5(a7)
+    sltu	s7,a6,t2
+    sltu	t0,t6,t2
+    lbu	s3,6(a7)
+    add	t0,s7,t0
+    sltu	s7,t5,t2
+    add	s7,t0,s7
+    sltu	t0,t4,t2
+    add	t0,s7,t0
+    sltu	s7,t3,t2
+    sltu	s11,t5,a6
+    add	t0,t0,s7
+    sltu	t2,s3,t2
+    sltu	s7,t6,a6
+    add	t0,t0,t2
+    add	s7,s7,s11
+    sltu	s11,t4,a6
+    slli	t2,t0,1
+    add	s11,s7,s11
+    sltu	s7,t3,a6
+    add	t2,t2,t0
+    add	s7,s11,s7
+    sltu	a6,s3,a6
+    sltu	t0,t5,t6
+    slli	t2,t2,1
+    add	a6,s7,a6
+    sltu	s7,t4,t6
+    add	a6,t2,a6
+    add	t0,t0,s7
+    sltu	t2,t3,t6
+    slli	s7,a6,2
+    add	t2,t0,t2
+    sltu	t6,s3,t6
+    sltu	t0,t3,t5
+    add	s7,s7,a6
+    add	t6,t2,t6
     sltu	a6,t4,t5
-    add	a3,a3,s10
-    add	a6,a6,s9
-    sltu	s10,t1,t5
-    add	a6,a6,s10
-    slli	s9,a3,2
-    sltu	s10,a7,t5
-    add	s9,s9,a3
-    add	a3,a6,s10
-    sltu	s10,t3,t4
-    sltu	a6,t1,t4
-    add	a3,a3,s9
-    add	a6,s10,a6
-    sltu	s9,a7,t4
-    slli	a3,a3,2
-    add	a6,a6,s9
-    add	a6,a6,a3
-    sltu	s9,a7,t3
-    slli	s10,a6,1
-    sltu	a3,t1,t3
-    add	a6,s10,a6
-    add	a3,a3,s9
-    add	a3,a3,a6
-    slli	a3,a3,1
-    sltu	a6,a7,t1
-    add	a3,s5,a3
-    add	a3,a3,a6
-    lbu	a3,0(a3)
-    sub	s9,t0,a5
-    addi	s9,s9,-1
-    blt	s9,a3,.L13
-    addi	a6,sp,16
-    addi	a3,s0,224
-    add	s0,a3,a6
-    addi	a3,t6,224
-    sb	zero,-212(s0)
-    add	t6,a3,a6
-    li	a3,1
-    sb	a3,-212(t6)
-    addi	a3,t5,224
-    add	t5,a3,a6
-    li	a3,2
-    sb	a3,-212(t5)
-    addi	a3,t4,224
-    add	t4,a3,a6
-    li	a3,3
-    sb	a3,-212(t4)
-    addi	a3,t3,224
-    add	t3,a3,a6
-    li	a3,4
-    sb	a3,-212(t3)
-    addi	a3,t1,224
-    add	t1,a3,a6
-    li	a3,5
-    sb	a3,-212(t1)
-    addi	a3,a7,224
-    add	a7,a3,a6
-    li	a3,6
-    sb	a3,-212(a7)
-    lbu	t3,28(sp)
-    lw	a7,8(sp)
-    lbu	a3,29(sp)
-    slli	a6,t3,1
-    lbu	t4,31(sp)
-    add	a6,a6,t3
-    addi	t1,sp,72
-    addi	a7,a7,7
-    lbu	t5,32(sp)
-    add	a7,t1,a7
+    add	a6,a6,t0
+    add	t6,t6,s7
+    sltu	t5,s3,t5
+    slli	t6,t6,2
+    add	t5,a6,t5
+    add	t5,t5,t6
+    sltu	a6,t3,t4
+    slli	t6,t5,1
+    sltu	t4,s3,t4
+    add	a6,a6,t4
+    add	t5,t6,t5
+    add	a6,a6,t5
     slli	a6,a6,1
-    sltu	t1,t3,a3
-    add	t6,a7,t3
-    add	a6,a6,a3
-    sltu	s10,a3,t4
-    sub	a6,a6,t1
-    lbu	t6,0(t6)
-    sltu	t1,t3,t4
-    add	t1,t1,s10
-    sltu	t3,t3,t5
-    add	s10,a7,a3
-    slli	s0,a6,2
-    sltu	a3,a3,t5
-    add	a6,s0,a6
-    sub	t1,t4,t1
-    add	a3,t3,a3
-    lbu	s10,0(s10)
-    sltu	t3,t4,t5
-    add	t1,t1,a6
-    sub	a3,t5,a3
-    slli	a6,t6,1
-    sub	a3,a3,t3
-    add	t4,a7,t4
-    slli	t1,t1,2
-    add	t6,a6,t6
-    add	t6,s10,t6
-    add	a6,a3,t1
-    lbu	t1,0(t4)
-    slli	a3,a6,2
-    add	a7,a7,t5
-    slli	t4,t6,1
-    lbu	t3,0(a7)
-    add	a3,a3,a6
-    add	a7,t4,t6
-    add	a7,t1,a7
-    slli	a3,a3,4
-    add	a3,a3,a6
-    slli	a6,a7,1
-    add	a3,a3,t3
-    add	a6,a6,a7
-    add	a3,a3,a6
-    add	a3,s11,a3
-    lbu	a3,0(a3)
-    blt	s9,a3,.L13
-    lw	a7,8(sp)
-    addi	a3,sp,78
-    add	a7,a3,a7
-    li	a3,0
-.L14:
-    lbu	a6,7(a0)
-    slli	t1,a3,1
-    add	a3,t1,a3
-    addi	a0,a0,1
-    add	a3,a6,a3
-    bne	a7,a0,.L14
-    lw	a0,12(sp)
-    and	a3,a3,a0
-    add	a3,s2,a3
-    lbu	a3,128(a3)
-    blt	s9,a3,.L13
-    add	a4,s2,a4
-    lbu	a4,860(a4)
-    addi	a5,s1,224
-    addi	a3,sp,16
-    add	a5,a5,a3
-    sb	zero,-192(a5)
-    sb	a4,-180(a5)
-    mv	a5,s1
-    li	a0,1
-    bne	a5,t0,.L3
-.L41:
-    slli	a4,a5,3
-    sub	a4,a4,a5
-    addi	a3,sp,72
-    slli	a4,a4,1
-    add	a4,a3,a4
-    li	a3,0
+    la	t4,pdb_perm
+    sltu	t3,s3,t3
+    add	a6,t4,a6
+    add	a6,a6,t3
+    lbu	a6,0(a6)
+    bge	s2,a6,.L45
+.L11:
+    li	a6,1
+    bne	s1,a3,.L3
+.L43:
+    addi	a5,sp,72
+    add	a2,a5,s5
+    li	a5,0
 .L5:
-    lbu	a6,0(a4)
-    addi	a7,a3,1
-    bne	a6,a3,.L39
-    lbu	a6,7(a4)
-    andi	a3,a7,0xff
-    addi	a4,a4,1
-    bne	a6,zero,.L39
-    bne	a3,t2,.L5
-    beq	a0,zero,.L21
+    lbu	a1,0(a2)
+    addi	a7,a5,1
+    bne	a1,a5,.L41
+    lbu	a1,7(a2)
+    andi	a5,a7,0xff
+    addi	a2,a2,1
+    bne	a1,zero,.L41
+    bne	a5,s4,.L5
+    beq	a6,zero,.L22
     la	a5,.LANCHOR0
-    sw	s3,0(a5)
-.L21:
-    mv	a0,t0
+    sw	s9,0(a5)
+.L22:
+    mv	a0,s1
     li	a7,1
     #APP
     # 18 "ripes_main.c" 1
@@ -304,9 +186,9 @@ main:
     # 0 "" 2
     #NO_APP
     addi	a5,sp,36
-    add	a4,t0,a5
-    beq	t0,zero,.L20
-.L19:
+    add	a4,s1,a5
+    beq	s1,zero,.L21
+.L20:
     li	a0,32
     li	a7,11
     #APP
@@ -322,22 +204,22 @@ main:
     # 0 "" 2
     #NO_APP
     addi	a5,a5,1
-    bne	a4,a5,.L19
-    j	.L20
-.L42:
-    addi	a4,a4,3
-    andi	a4,a4,0xff
-    bleu	a4,s4,.L9
-.L39:
-    addi	a5,a5,-1
-    bne	a5,s7,.L17
-    addi	t0,t0,1
+    bne	a4,a5,.L20
+    j	.L21
+.L44:
+    addi	a1,a1,3
+    andi	a1,a1,0xff
+    bleu	a1,s10,.L9
+.L41:
+    addi	a3,a3,-1
+    bne	a3,s8,.L18
+    addi	s1,s1,1
     li	a5,12
-    bne	t0,a5,.L2
-    beq	a0,zero,.L18
+    bne	s1,a5,.L2
+    beq	a6,zero,.L19
     la	a5,.LANCHOR0
-    sw	s3,0(a5)
-.L18:
+    sw	s9,0(a5)
+.L19:
     li	a0,-1
     li	a7,1
     #APP
@@ -352,7 +234,7 @@ main:
     ecall
     # 0 "" 2
     #NO_APP
-.L20:
+.L21:
     li	a0,10
     li	a7,11
     #APP
@@ -390,9 +272,155 @@ main:
     li	a0,0
     addi	sp,sp,288
     jr	ra
+.L45:
+    lw	t3,8(sp)
+    lw	a6,4(sp)
+    sub	t5,t3,a3
+    slli	t5,t5,1
+    addi	t3,sp,72
+    addi	a6,a6,7
+    add	a6,t3,a6
+    addi	t4,t5,224
+    la	t3,.LANCHOR1+64
+    addi	t5,sp,16
+    add	a5,t3,a5
+    add	t5,t4,t5
+    mv	t3,a6
+.L14:
+    lbu	t4,0(a2)
+    lbu	t0,0(a5)
+    addi	a2,a2,1
+    add	t4,t5,t4
+    lbu	t4,-161(t4)
+    li	t6,0
+    addi	a5,a5,1
+    add	t4,t4,t0
+    sltiu	t0,t4,3
+    bne	t0,zero,.L13
+    li	t6,3
 .L13:
-    li	a0,1
-    j	.L17
+    sub	t4,t4,t6
+    sb	t4,0(t3)
+    addi	t3,t3,1
+    bne	t1,a2,.L14
+    lbu	t1,0(a7)
+    lbu	a2,1(a7)
+    addi	t4,sp,16
+    lbu	a5,2(a7)
+    addi	t1,t1,224
+    add	t1,t1,t4
+    addi	a2,a2,224
+    sb	zero,-212(t1)
+    add	a2,a2,t4
+    lbu	t3,3(a7)
+    li	t4,1
+    sb	t4,-212(a2)
+    addi	a5,a5,224
+    addi	t4,sp,16
+    lbu	t1,4(a7)
+    add	a5,a5,t4
+    li	t4,2
+    sb	t4,-212(a5)
+    lbu	a2,5(a7)
+    lbu	a5,6(a7)
+    addi	a7,t3,224
+    addi	t3,sp,16
+    add	a7,a7,t3
+    li	t3,3
+    sb	t3,-212(a7)
+    addi	a7,t1,224
+    addi	t1,sp,16
+    add	a7,a7,t1
+    li	t1,4
+    sb	t1,-212(a7)
+    addi	a2,a2,224
+    addi	a7,sp,16
+    add	a2,a2,a7
+    li	a7,5
+    sb	a7,-212(a2)
+    addi	a5,a5,224
+    addi	a2,sp,16
+    add	a5,a5,a2
+    li	a2,6
+    sb	a2,-212(a5)
+    lbu	a5,28(sp)
+    lbu	t5,29(sp)
+    lbu	t3,31(sp)
+    slli	a2,a5,1
+    add	a2,a2,a5
+    lbu	t1,32(sp)
+    slli	a2,a2,1
+    sltu	a7,a5,t5
+    add	t4,a6,a5
+    add	a2,a2,t5
+    lbu	t6,0(t4)
+    sub	a2,a2,a7
+    sltu	t4,t5,t3
+    sltu	a7,a5,t3
+    add	a7,a7,t4
+    sltu	a5,a5,t1
+    add	t4,a6,t5
+    slli	t0,a2,2
+    sltu	t5,t5,t1
+    add	a2,t0,a2
+    sub	a7,t3,a7
+    add	a5,a5,t5
+    lbu	t4,0(t4)
+    add	a7,a7,a2
+    sub	a5,t1,a5
+    sltu	a2,t3,t1
+    slli	t5,t6,1
+    slli	a7,a7,2
+    sub	a5,a5,a2
+    add	t5,t5,t6
+    add	a2,a6,t3
+    add	a5,a5,a7
+    add	t4,t4,t5
+    lbu	a7,0(a2)
+    add	a6,a6,t1
+    slli	a2,a5,2
+    slli	t3,t4,1
+    lbu	t1,0(a6)
+    add	a2,a2,a5
+    add	a6,t3,t4
+    add	a6,a7,a6
+    slli	a2,a2,4
+    add	a5,a2,a5
+    slli	a2,a6,1
+    add	a2,a2,a6
+    add	a5,a5,t1
+    add	a5,a5,a2
+    la	a2,pdb_r_face
+    add	a5,a2,a5
+    lbu	a5,0(a5)
+    blt	s2,a5,.L11
+    lw	a2,4(sp)
+    addi	a5,sp,78
+    add	a6,a5,a2
+    li	a5,0
+.L15:
+    lbu	a2,7(s0)
+    slli	a7,a5,1
+    add	a5,a7,a5
+    addi	s0,s0,1
+    add	a5,a2,a5
+    bne	a6,s0,.L15
+    lw	a2,12(sp)
+    and	a5,a5,a2
+    la	a2,.LANCHOR1
+    add	a5,a2,a5
+    lbu	a5,128(a5)
+    blt	s2,a5,.L11
+    add	a1,a2,a1
+    lbu	a3,860(a1)
+    addi	a5,s6,224
+    addi	a2,sp,16
+    add	a5,a5,a2
+    sb	a3,-180(a5)
+    sb	zero,-192(a5)
+    mv	a3,s6
+    li	a6,1
+    j	.L18
 .data
 .LANCHOR1:
 source:

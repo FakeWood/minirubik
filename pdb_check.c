@@ -27,7 +27,7 @@ static uint32_t rank_state(const state_t *state)
     return (uint32_t) rank_perm(state) * ORIENTS + rank_orient(state);
 }
 
-/* The full h the solver's cutoff (exceeds in search.h) is based on: the max
+/* The full h the solver's cutoff (move_and_cut in search.h) is based on: the max
  * of the three tables. Each is an exact distance in a relaxed problem, so
  * neither exceeds the real distance, and neither does their max.
  */
