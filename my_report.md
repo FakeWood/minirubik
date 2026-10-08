@@ -1015,3 +1015,12 @@ The program checks its own answer (T5, L328–412) instead of leaving it to a ma
 On the pipelined `RV32_5S`, T6 prints the same output with 4,720,340 retired instructions in 5,250,313 cycles, a CPI of about 1.11, and also prints `verify: solved`.
 
 No instruction outside RV32I appears in the file (no `mul`, `div`, `rem`, no compressed or floating-point instructions), and nothing calls a helper.
+
+## AI Usage Disclosure
+
+Tool: Claude Code (Claude Opus 5.5).
+
+- **Stage 1:** Claude explained concepts, reviewed my drafts, polished the English and wrote `measure_mem.ps1`; the analysis, benchmarks and measurements are mine.
+- **Stage 2:** Claude explained concepts.
+- **Stage 3:** Claude wrote the C optimizations, the measurement tools and the report drafts.
+- **Stage 4:** Claude wrote `my_solver.s` and the report drafts.
