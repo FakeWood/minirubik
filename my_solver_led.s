@@ -2,8 +2,11 @@
 # databases of Stage 2 and the Stage 3 optimizations (written-out moves, lazy
 # orientations, lazy cutoff perm -> r_face -> orient, unrolled ranks).
 #
-# Input: the state string at `input` below (PPPPPPPOOOOOOO, as my_solver.c).
-# Output: the moves, e.g. "B' R' D2 R' B R B' R D2 B R'", then the node count.
+# Input: the list at `tests` below, one 16-byte record per state: the state
+# string (PPPPPPPOOOOOOO, as my_solver.c) with its NUL, then the expected
+# distance (255: not known). An empty string ends the list.
+# Output, per state: the state, the moves, the node count, the self check
+# and the length check; then whether every test passed.
 #
 # Ripes evaluates .equ symbols wrongly as load/store offsets, so every offset
 # below is a literal number; the layout tables say what each one means. Its
@@ -51,11 +54,22 @@ main:
     la   s5, pdb_r_face
     la   s6, pdb_orient
     li   s10, 9
+    la   s11, tests
+
+# One state per record at s11.
+next_test:
+    lbu  t0, 0(s11)
+    beqz t0, done            # empty string: end of the list
+    mv   a0, s11
+    jal  ra, print_str       # the state
+    li   a0, 10
+    li   a7, 11
+    ecall
     li   s9, 0
 
-# Parse the 14 digits into stack[0]: p[i] = input[i] - '1', o[i] =
-# input[7 + i] - '1'. The input is trusted; my_solver.c validates it.
-    la   t0, input
+# Parse the 14 digits into stack[0]: p[i] = state[i] - '1', o[i] =
+# state[7 + i] - '1'. The input is trusted; my_solver.c validates it.
+    mv   t0, s11
     la   t1, stack
     li   t2, 7
 parse:
@@ -288,7 +302,7 @@ pop:
     blt  s0, t0, deepen
     la   a0, msg_none
     jal  ra, print_str
-    j    exit
+    j    test_fail
 
 # depth == limit: solved iff p = 0 1 2 3 4 5 6 and o = 0. The padding bytes
 # 7 and 15 are always 0, so four word compares cover the slot.
@@ -334,12 +348,12 @@ print_done:
     li   a7, 11
     ecall
 
-# T5: replay path[0..limit-1] on the input and check that it ends solved.
-# This does not trust the search: the input is parsed again, and each move is
+# T5: replay path[0..limit-1] on the state and check that it ends solved.
+# This does not trust the search: the state is parsed again, and each move is
 # its face's quarter turn (qt_src/qt_tw, the R, B, D rows of the table in
 # cube.h) applied 1, 2 or 3 times in a loop, with a conditional subtract for
 # mod 3, instead of the written-out move blocks.
-    la   t0, input
+    mv   t0, s11
     la   t1, chk
     li   t2, 7
 vparse:
@@ -356,7 +370,7 @@ vparse:
     li   s1, 0
     li   t1, 3
 vmove:
-    jal  ra, render         # draw chk: the input, then each move's result
+    jal  ra, render         # draw chk: the state, then each move's result
     li   t1, 3              # render clobbers t1
     beq  s1, s0, vcheck
     add  t0, s3, s1
@@ -416,10 +430,57 @@ vcheck:                      # same solved test as at_limit
     lw   t0, 12(t2)
     bnez t0, vfail
     la   a0, msg_ok
-    j    vprint
+    jal  ra, print_str
+    j    vlength
 vfail:
     la   a0, msg_fail
-vprint:
+    jal  ra, print_str
+    la   t0, fails
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)
+
+# Length check: the solution length is the limit s0, compared with the
+# record's expected distance unless that is 255.
+vlength:
+    la   a0, msg_length
+    jal  ra, print_str
+    mv   a0, s0
+    li   a7, 1
+    ecall
+    lbu  t0, 15(s11)         # expected distance
+    li   t1, 255
+    beq  t0, t1, test_end
+    la   a0, msg_len_ok
+    beq  t0, s0, test_said
+test_fail:
+    la   t0, fails
+    lw   t1, 0(t0)
+    addi t1, t1, 1
+    sw   t1, 0(t0)
+    la   a0, msg_len_fail
+test_said:
+    jal  ra, print_str
+test_end:
+    li   a0, 10              # blank line after each test
+    li   a7, 11
+    ecall
+    ecall
+    addi s11, s11, 16
+    j    next_test
+
+# All records done: report the number of failed checks.
+done:
+    la   t0, fails
+    lw   a0, 0(t0)
+    beqz a0, all_pass
+    li   a7, 1
+    ecall
+    la   a0, msg_failed
+    j    report
+all_pass:
+    la   a0, msg_pass
+report:
     jal  ra, print_str
 exit:
     li   a7, 10
@@ -856,6 +917,8 @@ chk:                         # T5 replay state, same layout as a slot
     .zero 16
 tmp:                         # T5 replay scratch
     .zero 16
+fails:                       # failed checks over all tests
+    .word 0
 D:
     .zero 48                 # next, skip, path
     .byte 0,1,2, 1,2,0, 2,0,1    # plus[3][3]
@@ -930,12 +993,19 @@ facelets:
     .byte 6,0,9,17    # D
 
 
-# The state to solve. Test vectors:
-#   12345671111111  solved, 0 moves
-#   21345671111111  distance 11 (the spec's T6)
-#   54721631111111  distance 11, the most nodes (203,475)
-input:
-    .string "21345671111111"
+# The states to solve: 16 bytes each, the state string, its NUL, and the
+# expected distance (255 if not known, e.g. a grader's state: then only the
+# self check applies). An empty string ends the list. To measure one state
+# with --iret, leave only its record. Other distance-11 states:
+#   54721631111111  the most nodes (203,475)
+tests:
+    .string "12345671111111"     # solved
+    .byte 0
+    .string "26547312333212"     # short scramble: R B D'
+    .byte 3
+    .string "21345671111111"     # distance 11 (the spec's T6)
+    .byte 11
+    .byte 0                      # end of the list
 
 names:                       # 4 bytes per move name
     .string "R"
@@ -964,6 +1034,16 @@ msg_ok:
     .string "verify: solved\n"
 msg_fail:
     .string "verify: FAIL\n"
+msg_length:
+    .string "length: "
+msg_len_ok:
+    .string " ok"
+msg_len_fail:
+    .string " FAIL"
+msg_failed:
+    .string " check(s) failed\n"
+msg_pass:
+    .string "all tests passed\n"
 
 # Quarter turns R, B, D for the T5 replay (cube.h, rows R, B, D).
 qt_src:
