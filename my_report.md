@@ -873,35 +873,38 @@ So the C version already fits. The hand-written assembly follows the same struct
 
 ### Hand-written Assembly
 
-`my_solver.s` is the solver in RV32I assembly for Ripes. It runs the same search as `search.h`: iterative deepening, the explicit-stack `dls`, the written-out moves, the lazy cutoff perm → r_face → orient, and the unrolled ranks. Line numbers (L) below refer to `my_solver.s`.
+`my_solver.s` is the solver in RV32I assembly for Ripes. It runs the same search as `search.h`: iterative deepening, the explicit-stack `dls`, the written-out moves, the lazy cutoff perm → r_face → orient, and the unrolled ranks. Labels and comments named below are those in `my_solver.s`.
 
 #### Code Map
 
-| part | C counterpart | lines |
+| part | C counterpart | in `my_solver.s` |
 | --- | --- | --- |
-| layout and register comments | | L1–36 |
-| base registers | | L39–45 |
-| `parse`: input string into `stack[0]` | `parse_state` | L47–62 |
-| `deepen`: start a limit | `iddfs` | L64–72 |
-| `loop`: next move, face skip | `dls` | L74–86 |
-| `move_perm` dispatch | `move_perm` | L88–93 |
-| `rank_perm` and its cutoff | `rank_perm` | L95–150 |
-| `move_orient` dispatch | `move_orient` | L152–158 |
-| `rank_r_face` and its cutoff | `rank_r_face` | L160–233 |
-| `rank_orient` and its cutoff | `rank_orient` | L235–259 |
-| descend | `dls` | L261–269 |
-| `pop`, next limit | `dls`, `iddfs` | L271–282 |
-| `at_limit`: goal test | `is_solved` | L284–296 |
-| print the solution | `main` | L298–326 |
-| T5: replay the path, check solved | `pdb_check.c` step 3 | L328–412 |
-| exit | | L413–415 |
-| `print_str` | | L417–429 |
-| 9 `perm_*` blocks | `move_perm` cases | L431–584 |
-| 9 `orient_*` blocks | `move_orient` cases | L586–769 |
-| `stack`, `chk`, `tmp`, block `D`, jump tables | | L772–805 |
-| `input` | | L807–812 |
-| `names`, messages, `qt_src`, `qt_tw` | | L814–850 |
-| `pdb_perm`, `pdb_r_face`, `pdb_orient` | `pdb.h` | L852–3933 |
+| layout and register comments | | header comment |
+| renderer switch: `RENDER`, `DELAY` | | `.equ RENDER` |
+| base registers | | `main` |
+| `parse`: input string into `stack[0]` | `parse_state` | `parse` |
+| `deepen`: start a limit | `iddfs` | `deepen` |
+| `loop`: next move, face skip | `dls` | `loop`, `no_skip` |
+| `move_perm` dispatch | `move_perm` | `# move_perm` up to `perm_done` |
+| `rank_perm` and its cutoff | `rank_perm` | `# rank_perm` |
+| `move_orient` dispatch | `move_orient` | `# move_orient` up to `orient_done` |
+| `rank_r_face` and its cutoff | `rank_r_face` | `# rank_r_face` |
+| `rank_orient` and its cutoff | `rank_orient` | `# rank_orient` |
+| descend | `dls` | `# Not cut: descend` |
+| `pop`, next limit | `dls`, `iddfs` | `pop` |
+| `at_limit`: goal test | `is_solved` | `at_limit` |
+| print the solution | `main` | `print_move` to `print_done` |
+| self check | `pdb_check.c` step 3 | `vparse` to `vprint` |
+| exit | | `exit` |
+| `print_str` | | `print_str` |
+| `render` (LED build only) | | `render` |
+| 9 `perm_*` blocks | `move_perm` cases | `perm_R` to `perm_Dp` |
+| 9 `orient_*` blocks | `move_orient` cases | `orient_R` to `orient_Dp` |
+| `stack`, `chk`, `tmp`, block `D`, jump tables | | start of `.data` |
+| `palette`, `cface`, `facelets` (LED build only) | | after the jump tables |
+| `input` | | `input` |
+| `names`, messages, `qt_src`, `qt_tw` | | `names` to `qt_tw` |
+| `pdb_perm`, `pdb_r_face`, `pdb_orient` | `pdb.h` | `pdb_perm` to the end |
 
 #### Memory Layout
 
@@ -909,34 +912,36 @@ Everything lives in `.data`; there is no heap and no recursion.
 
 | data | bytes | contents |
 | --- | ---: | --- |
-| `stack` (L775) | 192 | 12 state slots of 16 bytes, one per depth 0..11 |
-| `chk`, `tmp` (L777–780) | 32 | T5 replay state and scratch, same layout as a slot |
-| `D` (L781) | 168 | per-depth arrays, small tables and jump tables (below) |
-| `input`, `names`, messages (L811–840) | 118 | the state string, the 9 move names, output text |
-| `qt_src`, `qt_tw` (L843–850) | 42 | quarter turns R, B, D for the T5 replay |
-| `pdb_perm` (L853) | 5,040 | |
-| `pdb_r_face` (L1065) | 68,040 | |
-| `pdb_orient` (L3902) | 729 | |
+| `stack` | 192 | 12 state slots of 16 bytes, one per depth 0..11 |
+| `chk`, `tmp` | 32 | self-check state and scratch, same layout as a slot |
+| `D` | 168 | per-depth arrays, small tables and jump tables (below) |
+| `input`, `names`, messages | 118 | the state string, the 9 move names, output text |
+| `qt_src`, `qt_tw` | 42 | quarter turns R, B, D for the self check |
+| `pdb_perm` | 5,040 | |
+| `pdb_r_face` | 68,040 | |
+| `pdb_orient` | 729 | |
 | total | 74,361 | 72.6 KiB, under 128 KiB |
 
-A state slot (described at L13–19) is `p[0..6]` at offsets 0..6 and `o[0..6]` at 8..14, with the bytes at 7 and 15 left at 0. 16 bytes per slot make a slot address a shift away, and the child of the slot at `s2` is always the next one, so its `p` is at `16(s2)` and its `o` at `24(s2)`.
+The LED build adds `palette` (24 bytes), `cface` (32) and `facelets` (96), 152 bytes in all, after the jump tables.
 
-Block `D` (described at L21–29, defined at L781–805) keeps every small table at a fixed offset from one base register `s3`, so any of them is one `lbu` (with an `add` for a variable index) and no `la`:
+A state slot (described in the header comment) is `p[0..6]` at offsets 0..6 and `o[0..6]` at 8..14, with the bytes at 7 and 15 left at 0. 16 bytes per slot make a slot address a shift away, and the child of the slot at `s2` is always the next one, so its `p` is at `16(s2)` and its `o` at `24(s2)`.
+
+Block `D` (described in the header comment) keeps every small table at a fixed offset from one base register `s3`, so any of them is one `lbu` (with an `add` for a variable index) and no `la`:
 
 | offset | contents |
 | ---: | --- |
 | 0 | `next[12]` |
 | 16 | `skip[12]` |
 | 32 | `path[12]` |
-| 48 | `plus[3][3]` (L783) |
-| 64 | `face_start[9]` (L785) |
-| 80 | `where[8]`, scratch for `rank_r_face` (L787) |
-| 96 | `jt_perm[9]`, the `move_perm` block of each move (L788–796) |
-| 132 | `jt_orient[9]`, the `move_orient` block of each move (L797–805) |
+| 48 | `plus[3][3]` |
+| 64 | `face_start[9]` |
+| 80 | `where[8]`, scratch for `rank_r_face` |
+| 96 | `jt_perm[9]`, the `move_perm` block of each move |
+| 132 | `jt_orient[9]`, the `move_orient` block of each move |
 
 #### Registers
 
-The register plan is also in the comment at L31–36.
+The register plan is also in the header comment.
 
 | register | use |
 | --- | --- |
@@ -969,19 +974,19 @@ The depth itself is never stored. In `dls`, the depth is only used for these, an
 | `s8` | `D` + depth | + 1 |
 | `s7` | limit − depth − 1 | − 1 |
 
-So descending is `addi s2, s2, 16`, `addi s8, s8, 1`, `addi s7, s7, -1` (L262–264), popping is the reverse (L272–274), and the three always hold what they would be computed from the depth. The two tests follow from $t = \text{limit} - \text{depth} - 1$:
+So descending is `addi s2, s2, 16`, `addi s8, s8, 1`, `addi s7, s7, -1` (after `# Not cut: descend`), popping is the reverse (`pop`), and the three always hold what they would be computed from the depth. The two tests follow from $t = \text{limit} - \text{depth} - 1$:
 
-- depth = limit $\iff$ $t = -1$ $\iff$ $t < 0$ (`bltz s7`, L76)
-- depth ≥ 0 $\iff$ $t \le \text{limit} - 1$ $\iff$ $t < \text{limit}$ (`blt s7, s0`, L275)
+- depth = limit $\iff$ $t = -1$ $\iff$ $t < 0$ (`bltz s7` at `loop`)
+- depth ≥ 0 $\iff$ $t \le \text{limit} - 1$ $\iff$ $t < \text{limit}$ (`blt s7, s0` in `pop`)
 
 Keeping the depth instead would cost a register, and every access would compute its address from it again: a `slli` by 4 and an `add` for `stack[depth]`, an `add` for `next[depth]`. With the three registers maintained directly, a level costs 3 `addi` and every access uses a constant offset.
 
 #### What Differs from GCC's Version
 
-- **The child's `p` stays in registers.** Each `move_perm` block (e.g. `perm_R`, L433–448) loads the 7 cubies into `t0`..`t6` before storing them, and those registers are the child's `p[0..6]`. `rank_perm` compares them directly instead of reloading 7 bytes, and `rank_r_face` builds `where[]` from them too (L161–180). The `move_orient` blocks only use `a1`..`a7`, so `t0`..`t6` survive until `rank_r_face`.
-- **The rank digits go straight into the Horner sum.** In `rank_perm` (L95–150), each `sltu` result is added into the running rank right after it is multiplied by the next radix, so no digit needs its own register.
-- **Loads come before their uses.** A move block (e.g. `orient_R`, L586–609) loads all 7 values before storing any, so no `sb` waits on the `lbu` right before it. This does not change the instruction count, but it avoids load-use stalls on the pipelined models.
-- **One base register for all small tables.** `s3` plus a constant offset (e.g. `lbu a1, 64(a1)` for `face_start`, L267) replaces a `la` (2 instructions) each time a table is used.
+- **The child's `p` stays in registers.** Each `move_perm` block (e.g. `perm_R`) loads the 7 cubies into `t0`..`t6` before storing them, and those registers are the child's `p[0..6]`. `rank_perm` compares them directly instead of reloading 7 bytes, and `rank_r_face` builds `where[]` from them too. The `move_orient` blocks only use `a1`..`a7`, so `t0`..`t6` survive until `rank_r_face`.
+- **The rank digits go straight into the Horner sum.** In `rank_perm`, each `sltu` result is added into the running rank right after it is multiplied by the next radix, so no digit needs its own register.
+- **Loads come before their uses.** A move block (e.g. `orient_R`) loads all 7 values before storing any, so no `sb` waits on the `lbu` right before it. This does not change the instruction count, but it avoids load-use stalls on the pipelined models.
+- **One base register for all small tables.** `s3` plus a constant offset (e.g. `lbu a1, 64(a1)` for `face_start` when descending) replaces a `la` (2 instructions) each time a table is used.
 - **Pointers, not indices.** `s2`, `s8` and `s7` move by constants, so no slot or array address is recomputed from the depth.
 
 The 18 move blocks and the PDB `.byte` lines are generated by a script from the source/twist table in `cube.h` and from `pdb.h`, so that none of the 63 source/twist pairs or 73,809 table bytes is copied by hand. The rest is written by hand.
@@ -989,12 +994,77 @@ The 18 move blocks and the PDB `.byte` lines are generated by a script from the 
 #### Ripes Quirks
 
 - `.equ` symbols used as a load/store offset give a wrong address: `sb t0, OFF(s3)` with `.equ OFF, 4` did not touch `4(s3)`. Every offset is therefore a literal, documented in the layout tables at the top of the file.
-- `.data` has to come after `.text` (L774): `.word perm_R` in a jump table fails with "Unknown symbol" if the label has not been seen yet.
-- The print-string `ecall` (4) also prints the terminating NUL, which shows up as an extra space. `print_str` (L417–429) prints one character at a time with `ecall` 11 instead.
+- `.data` has to come after `.text`: `.word perm_R` in a jump table fails with "Unknown symbol" if the label has not been seen yet.
+- There is no conditional assembly: `.if` and `.endif` are "Unknown directive" in the v2.2.6-106 build used here. The CLI also has no I/O peripherals, so `LED_MATRIX_0_BASE` is an undefined symbol there and a file that mentions it does not assemble at all, even behind a runtime test. See [LED Matrix](#led-matrix) for how the renderer is switched instead.
+- The print-string `ecall` (4) also prints the terminating NUL, which shows up as an extra space. `print_str` prints one character at a time with `ecall` 11 instead.
+
+#### LED Matrix
+
+The LED build draws the cube as an unfolded net on a 35 × 25 LED Matrix, once for the input and once after every move of the returned path.
+
+##### Two Builds from One File
+
+The spec asks for `.equ RENDER, 0` and `.if RENDER`, but Ripes has neither `.if` nor the LED symbols in the CLI (see [Ripes Quirks](#Ripes-Quirks)). So every renderer line in `my_solver.s` starts with `#R `, which makes it a comment:
+
+```asm
+vmove:
+#R     jal  ra, render         # draw chk: the input, then each move's result
+#R     li   t1, 3              # render clobbers t1
+    beq  s1, s0, vcheck
+```
+
+`my_solver.s` itself is the CLI build: it runs as is, and every `--iret` count and code size in this note is from it. `make my_solver_led.s` produces the GUI build with one `sed`, which removes the `#R ` prefixes and sets `RENDER` to 1. The two builds differ in nothing else, and the CLI build's counts are unchanged (T6 still retires 4,720,341).
+
+##### Where the Frames Come From
+
+`render` draws `chk`, the state of the [Self Check](#Self-Check) replay. The replay applies `path[]`, the moves the search actually returned, so the animation is the solver's own output and not a recorded one. `render` is called at the top of `vmove`, which runs once before the first move and once after each move, so a path of $n$ moves gives $n + 1$ frames, the last one solved.
+
+##### Layout
+
+The net is a 4 × 3 grid of face slots with U above F, then L, F, R, B across, and D below F. A face is 2 × 2 facelets of 4 × 3 pixels, so 8 × 6 pixels, and the slots are 1 pixel apart:
+
+- width: $4 \times 8 + 3 = 35$
+- height: $3 \times 6 + 2 = 20$, leaving 5 of the 25 rows unused
+
+The top-left pixel of a face slot at column $c$, row $r$ is at $(9c, 7r)$. Each face is drawn as seen from outside the cube, unfolded around F: R is seen from the right with F on its left, B from behind with R on its left, U from above with F at its bottom, and D from below with F at its top.
+
+##### Which Colour Goes Where
+
+The state stores, for each position, a cubie $c$ and a twist $o$, not colours. Each corner position touches 3 faces. List them clockwise as seen from outside the corner, starting from the U or D face, as slots $k = 0, 1, 2$. Then $o$ is the slot that the cubie's own U/D sticker sits in. This convention is checked against the move table: modelling R, B and D as 90° rotations of the cube's corner coordinates, and $o$ as above, reproduces all 63 source/twist pairs of `cube.h`. Listing the faces counter-clockwise reproduces them only with the sign of $o$ flipped.
+
+So the sticker at slot $k$ of a position is the cubie's own sticker $j = (k - o) \bmod 3$, and its colour is the face that sticker belongs to when the cubie is home. That gives three tables:
+
+- `facelets`: for each of the 24 facelets, the position, its slot $k$ there, and the $(x, y)$ of its top-left pixel
+- `cface[c][j]`: the face of cubie $c$'s sticker $j$, 4 bytes per cubie so the row is a shift away; the anchor at position 0 is cubie 0 with $o = 0$
+- `palette[face]`: one `0x00RRGGBB` word per face
+
+`render` does, for each facelet:
+
+```asm
+#R     sub  t1, t1, t3           # j = k - o, in -2..2
+#R     bgez t1, r_face
+#R     addi t1, t1, 3
+```
+
+then two table loads for the colour, and 12 `sw` for the 4 × 3 block.
+
+##### No Multiply
+
+A pixel's address is $\text{BASE} + 4(y \cdot \text{WIDTH} + x)$. Instead of multiplying, `render` loads `LED_MATRIX_0_WIDTH` once and shifts it to a row stride of $4 \cdot \text{WIDTH}$ bytes, then adds the stride $y$ times to reach the facelet's first row. Inside the block the 4 pixels of a row are `sw` at offsets 0, 4, 8, 12, and the next row is one more stride. `LED_MATRIX_0_BASE` and `LED_MATRIX_0_WIDTH` come from the peripheral's symbols, never from literals. `DELAY` (200,000 iterations of a 2-instruction loop) slows each frame down enough to watch.
+
+##### Checking the Renderer
+
+The CLI cannot show the matrix, so the drawing logic is checked there with a test copy of the LED build: the LED symbols point at a 3,500-byte buffer in `.data`, and after every frame a small routine prints the buffer as 20 lines of 35 letters, one per face colour. A Python model of the cube (corner coordinates, the three rotations, the slot convention above) renders the same path independently. For `43752611332133` (9 moves) all 10 frames, 700 pixels each, match, and the last frame is the solved cube.
+
+#### Self Check
+
+The spec requires the program to validate its result itself (T5: every returned path must reach the solved state), instead of leaving it to a manual comparison. After printing, it parses `input` again into `chk`, replays `path[0..limit-1]` on it, and runs the same four-word solved test as `at_limit`, printing `verify: solved` or `verify: FAIL`. The replay does not reuse the search's code: each move is its face's quarter turn from `qt_src`/`qt_tw` (the R, B, D rows of the table in `cube.h`) applied 1, 2 or 3 times in a loop, with a conditional subtract for mod 3. A bug in a written-out move block or in a generated table row therefore shows up as a mismatch, not as the same wrong state twice. Changing one twist row of `qt_tw` on purpose makes T6 print `verify: FAIL`.
+
+The check runs once, at most 11 × 3 quarter turns, and adds 176 retired instructions for the solved state and 2,881 for the worst state.
 
 #### Result
 
-Each state is put into `input` (L812), run on Ripes, and compared with `my_solver.exe` (moves and node count):
+Each state is put into `input`, run on Ripes, and compared with `my_solver.exe` (moves and node count):
 
 | state | moves | nodes | `RV32_ISS` retired |
 | --- | ---: | ---: | ---: |
@@ -1009,8 +1079,6 @@ Each state is put into `input` (L812), run on Ripes, and compared with `my_solve
 | `54721631111111` (worst) | 11 | 203,475 | **26,494,432** |
 
 All 9 match the host exactly and print `verify: solved`. The worst state takes about 130 instructions per node, 0.53× the budget, and 19% fewer than GCC's 32,582,677 for the same search.
-
-The program checks its own answer (T5, L328–412) instead of leaving it to a manual comparison. After printing, it parses `input` again into `chk`, replays `path[0..limit-1]` on it, and runs the same four-word solved test as `at_limit`, printing `verify: solved` or `verify: FAIL`. The replay does not reuse the search's code: each move is its face's quarter turn from `qt_src`/`qt_tw` (the R, B, D rows of the table in `cube.h`) applied 1, 2 or 3 times in a loop, with a conditional subtract for mod 3. A bug in a written-out move block or in a generated table row therefore shows up as a mismatch, not as the same wrong state twice. Changing one twist row of `qt_tw` on purpose makes T6 print `verify: FAIL`. The check runs once, at most 11 × 3 quarter turns, and adds 176 retired instructions for the solved state and 2,881 for the worst state.
 
 On the pipelined `RV32_5S`, T6 prints the same output with 4,720,340 retired instructions in 5,250,313 cycles, a CPI of about 1.11, and also prints `verify: solved`.
 

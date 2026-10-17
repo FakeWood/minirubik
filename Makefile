@@ -29,6 +29,11 @@ ripes_main.s: ripes_main.c cube.h search.h pdb.h gcc2ripes.py
 	python3 gcc2ripes.py $@.gcc > $@
 	$(RM) $@.gcc
 
+# LED build of my_solver.s for the Ripes GUI (LED Matrix 35 x 25): uncomment
+# the "#R " renderer lines and set RENDER to 1. Nothing else differs.
+my_solver_led.s: my_solver.s
+	sed -e 's/^#R //' -e 's/^\.equ RENDER, 0/.equ RENDER, 1/' $< > $@
+
 # Fails with "undefined reference" for every helper the search core needs.
 rv32i-check: rv32i_check.c cube.h search.h pdb.h
 	$(RV_CC) $(RV_CFLAGS) -e solve $< -o /dev/null
@@ -113,4 +118,4 @@ endif
 	$(CLANG_FORMAT) -i $(C_SOURCES)
 
 clean:
-	$(RM) solver mini
+	$(RM) solver mini my_solver_led.s

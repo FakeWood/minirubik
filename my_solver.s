@@ -34,6 +34,15 @@
 #     s3  D                s7  t = limit - depth - 1
 #     s4  pdb_perm         s10 9 (MOVES)
 #     a0  current move; t0..t6 the child's p[0..6] after move_perm.
+#
+# Renderer: lines starting with "#R " are the LED matrix renderer. This file
+# is the CLI build used for --iret and code size: they stay comments, and
+# RENDER is 0. `make my_solver_led.s` uncomments them and sets RENDER to 1;
+# nothing else differs. Ripes has no .if, and the LED_MATRIX_0_* symbols only
+# exist once the LED Matrix peripheral (35 x 25) is added in the GUI, so the
+# CLI build cannot even contain a guarded reference to them.
+.equ RENDER, 0
+#R .equ DELAY, 200000          # busy-wait per frame, to see each move
 
 .text
 main:
@@ -347,6 +356,8 @@ vparse:
     li   s1, 0
     li   t1, 3
 vmove:
+#R     jal  ra, render         # draw chk: the input, then each move's result
+#R     li   t1, 3              # render clobbers t1
     beq  s1, s0, vcheck
     add  t0, s3, s1
     lbu  t0, 32(t0)          # path[i] = 3 face + turns - 1
@@ -427,6 +438,73 @@ print_char:
     j    print_char
 print_end:
     ret
+
+#R # render: draw chk on the LED matrix as an unfolded net, then wait DELAY.
+#R # Net: U above F, then L F R B across, D below F. A face slot is 8 x 6
+#R # pixels (2 x 2 facelets of 4 x 3) plus a 1-pixel separator, so the net
+#R # is 4 * 9 - 1 = 35 wide and 3 * 7 - 1 = 20 tall. For each of the 24
+#R # facelets: the cubie at its position and that cubie's twist o give the
+#R # sticker's slot j = (k - o) mod 3 on the cubie, cface gives its face,
+#R # palette its colour. No multiply: a row is reached by adding WIDTH * 4
+#R # y times, and the 4 x 3 block walks +4 per column, +WIDTH * 4 per row.
+#R render:
+#R     la   a0, facelets
+#R     la   a1, cface
+#R     la   a2, palette
+#R     la   a3, chk
+#R     li   a4, 24
+#R     li   a5, LED_MATRIX_0_WIDTH
+#R     slli a5, a5, 2            # row stride in bytes
+#R r_next:
+#R     lbu  t0, 0(a0)            # position (0 = anchor)
+#R     lbu  t1, 1(a0)            # slot k at that position
+#R     li   t2, 0                # anchor: cubie 0, o = 0
+#R     li   t3, 0
+#R     beqz t0, r_slot
+#R     add  t4, a3, t0
+#R     lbu  t2, -1(t4)           # p[position - 1]
+#R     addi t2, t2, 1            # solver cubie label + 1 = cface row
+#R     lbu  t3, 7(t4)            # o[position - 1]
+#R r_slot:
+#R     sub  t1, t1, t3           # j = k - o, in -2..2
+#R     bgez t1, r_face
+#R     addi t1, t1, 3
+#R r_face:
+#R     slli t2, t2, 2
+#R     add  t2, t2, a1
+#R     add  t2, t2, t1
+#R     lbu  t2, 0(t2)            # cface[cubie][j]
+#R     slli t2, t2, 2
+#R     add  t2, t2, a2
+#R     lw   t2, 0(t2)            # colour
+#R     lbu  t3, 2(a0)            # x
+#R     lbu  t4, 3(a0)            # y
+#R     li   t5, LED_MATRIX_0_BASE
+#R     slli t3, t3, 2
+#R     add  t5, t5, t3
+#R r_row:                        # t5 += y * WIDTH * 4
+#R     beqz t4, r_rows
+#R     add  t5, t5, a5
+#R     addi t4, t4, -1
+#R     j    r_row
+#R r_rows:
+#R     li   t4, 3
+#R r_fill:                       # one 4-pixel row of the facelet
+#R     sw   t2, 0(t5)
+#R     sw   t2, 4(t5)
+#R     sw   t2, 8(t5)
+#R     sw   t2, 12(t5)
+#R     add  t5, t5, a5
+#R     addi t4, t4, -1
+#R     bnez t4, r_fill
+#R     addi a0, a0, 4
+#R     addi a4, a4, -1
+#R     bnez a4, r_next
+#R     li   t0, DELAY
+#R r_wait:
+#R     addi t0, t0, -1
+#R     bnez t0, r_wait
+#R     ret
 
 # Move blocks, reached through jt_perm / jt_orient. Generated from the
 # source/twist table in cube.h.
@@ -803,6 +881,54 @@ D:
     .word orient_D
     .word orient_D2
     .word orient_Dp
+
+#R # LED renderer data. palette[face] is 0x00RRGGBB, faces U D F B R L.
+#R palette:                    # word aligned: D is 168 bytes
+#R     .word 0xFFFFFF           # U
+#R     .word 0xFFD500           # D
+#R     .word 0x009B48           # F
+#R     .word 0x0046AD           # B
+#R     .word 0xB71234           # R
+#R     .word 0xFF5800           # L
+#R # cface[cubie][j]: face of the cubie's j-th sticker, clockwise from its
+#R # U/D sticker as seen from outside; 4 bytes per cubie (cubie 0 = anchor).
+#R cface:
+#R     .byte 0,5,2,0        # cubie 0
+#R     .byte 0,2,4,0        # cubie 1
+#R     .byte 1,4,2,0        # cubie 2
+#R     .byte 1,2,5,0        # cubie 3
+#R     .byte 0,4,3,0        # cubie 4
+#R     .byte 1,3,4,0        # cubie 5
+#R     .byte 1,5,3,0        # cubie 6
+#R     .byte 0,3,5,0        # cubie 7
+#R # facelets: position (0 = anchor), slot k at that position, x, y of the
+#R # facelet's top-left pixel in the net.
+#R facelets:
+#R     .byte 0,0,9,3     # U
+#R     .byte 1,0,13,3    # U
+#R     .byte 4,0,13,0    # U
+#R     .byte 7,0,9,0     # U
+#R     .byte 0,1,4,7     # L
+#R     .byte 3,2,4,10    # L
+#R     .byte 6,1,0,10    # L
+#R     .byte 7,2,0,7     # L
+#R     .byte 0,2,9,7     # F
+#R     .byte 1,1,13,7    # F
+#R     .byte 2,2,13,10   # F
+#R     .byte 3,1,9,10    # F
+#R     .byte 1,2,18,7    # R
+#R     .byte 2,1,18,10   # R
+#R     .byte 4,1,22,7    # R
+#R     .byte 5,2,22,10   # R
+#R     .byte 4,2,27,7    # B
+#R     .byte 5,1,27,10   # B
+#R     .byte 6,2,31,10   # B
+#R     .byte 7,1,31,7    # B
+#R     .byte 2,0,13,14   # D
+#R     .byte 3,0,9,14    # D
+#R     .byte 5,0,13,17   # D
+#R     .byte 6,0,9,17    # D
+
 
 # The state to solve. Test vectors:
 #   12345671111111  solved, 0 moves
