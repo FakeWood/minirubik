@@ -346,6 +346,30 @@ Each table is admissible, so their max is admissible too.
 
 PDB 3 seems feasible so we'll take it and try to turn it into assembly code.
 
+#### Table Check
+
+Admissibility (H1) only says no entry is too large. The spec also asks that every table is fully populated, with its maximum value and solved entry verified (H2). `pdb_check.c` checks more than that: every entry against the full BFS oracle, not against `pdb_generator.c`.
+
+A table is a BFS over abstract states, and a move acts on an abstract state the same way whichever full state stands for it. So the distance of an abstract state $a$ is the fewest moves to any full state that maps to it:
+
+$$\text{pdb}[a] = \min_{s \,:\, \text{rank}(s) = a} d(s)$$
+
+`check_table` computes this minimum from the oracle for every entry, then compares the whole table with it. That covers each part of H2:
+
+- populated: every entry has a full state mapping to it ("unreached" counts entries with none, i.e. a gap in the rank), and none differs from the oracle
+- solved entry: the rank of the solved state holds 0, and it is the only 0
+- maximum: the table's maximum equals the oracle's
+
+| table | entries | unreached | differ | solved entry | max |
+| --- | ---: | ---: | ---: | --- | ---: |
+| `pdb_orient` | 729 | 0 | 0 | `[0]` = 0 | 6 |
+| `pdb_perm` | 5,040 | 0 | 0 | `[0]` = 0 | 7 |
+| `pdb_r_face` | 68,040 | 0 | 0 | `[405]` = 0 | 8 |
+
+The solved state of `pdb_r_face` is not entry 0, because its rank counts the R-face cubies' positions among the free ones. Changing `pdb_perm[0]` from 0 to 1 in a copy of `pdb.h` makes it print `H2 FAIL: pdb_perm[0] = 1, oracle 0`, with 1 entry differing and no zero entry.
+
+Every table stores one distance per byte, so there is no packed accessor and the packed-versus-unpacked check (H4) does not apply.
+
 ## Stage 3: Improve Efficiency in C
 
 ### Remove Unsupported Instructions

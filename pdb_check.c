@@ -3,10 +3,14 @@
  * 1. Full BFS from solved gives the true distance d(s) of all 3,674,160
  *    states (a host-only oracle; the target never sees this table).
  * 2. H1: h(s) <= d(s) for every state, plus how tight h is.
- * 3. Every distance-11 state is solved with IDA*: the solution must have 11
+ * 3. H2: every pattern database entry is the exact distance of its abstract
+ *    state: the smallest d(s) over the full states s that map to it. This
+ *    also shows every entry is populated, the solved entry is 0 and the
+ *    maximum is right, all against the oracle rather than pdb_generator.c.
+ * 4. Every distance-11 state is solved with IDA*: the solution must have 11
  *    moves and reach solved, and the node counts are summarised.
  *
- * With --all, step 3 runs on every state instead (H3, slow).
+ * With --all, step 4 runs on every state instead (H3, slow).
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -38,6 +42,77 @@ static uint8_t heuristic(const state_t *state)
     uint8_t hr = pdb_r_face[rank_r_face(state)];
     uint8_t h = ho > hp ? ho : hp;
     return h > hr ? h : hr;
+}
+
+/* Widen the ranks to one signature for check_table(). */
+static uint32_t rank_orient32(const state_t *state)
+{
+    return rank_orient(state);
+}
+
+static uint32_t rank_perm32(const state_t *state)
+{
+    return rank_perm(state);
+}
+
+/* H2 for one table. Each table is a BFS over the abstract states that
+ * `rank` projects onto, and a move acts on an abstract state the same way
+ * whichever full state stands for it. So an abstract state's distance is the
+ * fewest moves to any full state mapping to it: the minimum of d(s) over
+ * them, taken here from the oracle.
+ */
+static int check_table(const char *name, const uint8_t *table, uint32_t size,
+                       uint32_t (*rank)(const state_t *),
+                       const state_t *states, const uint8_t *dist,
+                       uint32_t count)
+{
+    uint8_t *want = malloc(size);
+    if (!want) {
+        fputs("out of memory\n", stderr);
+        return 0;
+    }
+    memset(want, UNSEEN, size);
+    for (uint32_t i = 0; i < count; ++i) {
+        uint32_t idx = rank(&states[i]);
+        uint8_t d = dist[rank_state(&states[i])];
+        if (d < want[idx])
+            want[idx] = d;
+    }
+
+    state_t solved;
+    for (uint8_t i = 0; i < CUBIES; ++i)
+        solved.p[i] = i, solved.o[i] = 0;
+    uint32_t start = rank(&solved);
+
+    int ok = 1;
+    uint32_t unreached = 0, wrong = 0, zeros = 0;
+    uint8_t max = 0, want_max = 0;
+    for (uint32_t i = 0; i < size; ++i) {
+        if (want[i] == UNSEEN)
+            ++unreached; /* no full state maps here: a rank gap */
+        else if (want[i] > want_max)
+            want_max = want[i];
+        if (table[i] != want[i]) {
+            if (!wrong)
+                fprintf(stderr, "H2 FAIL: %s[%lu] = %u, oracle %u\n", name,
+                        (unsigned long) i, table[i], want[i]);
+            ++wrong;
+        }
+        if (table[i] == 0)
+            ++zeros;
+        if (table[i] > max)
+            max = table[i];
+    }
+    if (unreached || wrong || table[start] != 0 || zeros != 1 ||
+        max != want_max)
+        ok = 0;
+    printf("H2 %s: %lu entries, %lu unreached, %lu differ from the oracle, "
+           "solved entry [%lu] = %u, %lu zero, max %u (oracle %u): %s\n",
+           name, (unsigned long) size, (unsigned long) unreached,
+           (unsigned long) wrong, (unsigned long) start, table[start],
+           (unsigned long) zeros, max, want_max, ok ? "ok" : "FAIL");
+    free(want);
+    return ok;
 }
 
 static void print_state(FILE *out, const state_t *state)
@@ -138,7 +213,15 @@ int main(int argc, char **argv)
         if (gap_hist[g])
             printf("  d-h=%d: %lu\n", g, gap_hist[g]);
 
-    /* 3. Solve distance-11 states (or all states with --all). */
+    /* 3. H2: every table entry against the oracle. */
+    int tables = check_table("pdb_orient", pdb_orient, 729, rank_orient32,
+                             queue, dist, tail);
+    tables &= check_table("pdb_perm", pdb_perm, 5040, rank_perm32, queue,
+                          dist, tail);
+    tables &= check_table("pdb_r_face", pdb_r_face, 68040, rank_r_face, queue,
+                          dist, tail);
+
+    /* 4. Solve distance-11 states (or all states with --all). */
     unsigned count = all ? tail : per_depth[MAX_DEPTH];
     unsigned long *cost = malloc(sizeof(unsigned long) * count);
     if (!cost) {
@@ -172,5 +255,5 @@ int main(int argc, char **argv)
     free(cost);
     free(queue);
     free(dist);
-    return failures != 0 || !admissible;
+    return failures != 0 || !admissible || !tables;
 }
