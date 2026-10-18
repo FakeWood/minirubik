@@ -1106,6 +1106,23 @@ A pixel's address is $\text{BASE} + 4(y \cdot \text{WIDTH} + x)$. Instead of mul
 
 The CLI cannot show the matrix, so the drawing logic is checked there with a test copy of the LED build: the LED symbols point at a 3,500-byte buffer in `.data`, and after every frame a small routine prints the buffer as 20 lines of 35 letters, one per face colour. A Python model of the cube (corner coordinates, the three rotations, the slot convention above) renders the same path independently. For `43752611332133` (9 moves) all 10 frames, 700 pixels each, match, and the last frame is the solved cube.
 
+##### Running in the GUI
+
+Setup:
+
+1. `make my_solver_led.s` (or the `sed` line in the Makefile) to get the LED build.
+2. In Ripes' I/O tab, add an LED Matrix and set Width 35 and Height 25 (Ripes lists Height first).
+3. Load `my_solver_led.s` as assembly, with the processor `RV32_ISS` or `RV32_5S`.
+4. Set a breakpoint on `render`. Run (F8) stops there before each frame is drawn, so every press of F8 shows the previous frame on the matrix. Running freely, Ripes does not redraw the matrix until the program stops.
+
+The three tests draw 1, 4 and 12 frames: the solved cube once, then the input and the state after each move for the other two. The frames of the short scramble `26547312333212`, solved by D B' R':
+
+| input | after D | after B' | after R' |
+| :---: | :---: | :---: | :---: |
+| ![img](./imgs/led-0.png) | ![img](./imgs/led-1.png) | ![img](./imgs/led-2.png) | ![img](./imgs/led-3.png) |
+
+The last frame shows every face in one colour, the same state the self check confirms with `verify: solved`.
+
 #### Self Check
 
 The spec requires the program to validate its result itself (T5: every returned path must reach the solved state), instead of leaving it to a manual comparison. After printing, it parses the state string again into `chk`, replays `path[0..limit-1]` on it, and runs the same four-word solved test as `at_limit`, printing `verify: solved` or `verify: FAIL`. The replay does not reuse the search's code: each move is its face's quarter turn from `qt_src`/`qt_tw` (the R, B, D rows of the table in `cube.h`) applied 1, 2 or 3 times in a loop, with a conditional subtract for mod 3. A bug in a written-out move block or in a generated table row therefore shows up as a mismatch, not as the same wrong state twice. Changing one twist row of `qt_tw` on purpose makes T6 print `verify: FAIL`.
