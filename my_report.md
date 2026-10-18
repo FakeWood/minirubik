@@ -62,7 +62,16 @@ By the definition of a [Cayley graph](https://mathworld.wolfram.com/CayleyGraph.
 - **$I \notin S$:** there is no "don't move" among the 9 HTM turns.
 - **One vertex for each group element:** Once an element of $G$ is applied to the solved state, each element of $G$ corresponds to a legal state, which means that state can be reached from the solved state by moves. Suppose we don't fix the FUL corner and all 6 faces may turn. Since whole-cube rotations look the same in the real world, a move can produce the same result as another move seen from a different perspective of the cube. E.g., L and R' give the same result up to a whole-cube rotation. This violates the definition of one vertex for each group element, and the graph becomes a Schreier coset graph instead, which would complicate moves and encoding. So we fix FUL to get a Cayley graph rather than a Schreier coset graph.
 - **Directed edges $(g, h)$ whenever $gh^{-1} \in S$:** each HTM move is a directed edge that links two states. If there is an edge $g \to h$, there is also an edge $h \to g$, since every move has an inverse move. So the distance from solved to $s$ is the same as from $s$ to solved. This is the property `solver.c` uses to run BFS from the solved state and retrieve the path from the given state.
-- **Diameter:** The diameter of the HTM graph is 11 so all the states can be reached within 11 HTM moves. This is proved by the BFS in `solver.c`, which checks every state's shortest distance and finds that the deepest level is 11 and no state needs more moves. See [Pocket Cube](https://www.jaapsch.net/puzzles/cube2.htm#numpos) to get more information.
+- **Diameter:** The diameter of the HTM graph is 11: some state needs 11 moves, and none needs more. A BFS from the solved state gives the evidence, since it reaches every state first at its exact distance. `pdb_check.c` runs one over all states and counts them per distance:
+
+  | $d$ | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | states | 1 | 9 | 54 | 321 | 1,847 | 9,992 | 50,136 | 227,536 | 870,072 | 1,887,748 | 623,800 | 2,644 |
+
+  - **Depth 11 exists:** 2,644 states are at distance 11, about 0.072% of all states.
+  - **Nothing deeper:** the BFS reaches 3,674,160 of 3,674,160 states, which is $|G|$, and the counts for $d = 0$ to $11$ sum to exactly 3,674,160. Every state is therefore within 11 moves, and the BFS queue runs empty after level 11.
+
+  Most states sit near the far end: 51.4% are at distance 9, and 92.0% at distances 8 to 10. The counts match the published HTM table at [Pocket Cube](https://www.jaapsch.net/puzzles/cube2.htm#numpos):
   > The number of positions that can be reached in n moves from the start, but which cannot be reached in fewer than n moves:
   > - HTM: 1, 9, 54, 321, 1847, 9992, 50136, 227536, 870072, 1887748, 623800, 2644
   > - QTM: 1, 6, 27, 120, 534, 2256, 8969, 33058, 114149, 360508, 930588, 1350852, 782536, 90280, 276
@@ -1151,6 +1160,43 @@ All 10 match the host exactly and print `verify: solved` and `all tests passed`.
 On the pipelined `RV32_5S`, the three test records print the same output as on `RV32_ISS`, `all tests passed` included (T7), with 4,725,753 retired instructions in 5,257,180 cycles, a CPI of about 1.11. T6 alone retires 4,720,605 in 5,250,749 cycles.
 
 No instruction outside RV32I appears in the file (no `mul`, `div`, `rem`, no compressed or floating-point instructions), and nothing calls a helper.
+
+#### Code Size
+
+Conventions:
+
+- **Retired instructions:** `--iret` on Ripes v2.2.6-106 `RV32_ISS`, the same input for every build compared.
+- **Code size:** bytes of linked `.text` of the CLI build, i.e. `my_solver.s` as is, with the renderer commented out. Ripes does not output a linked file, so both builds are linked with the GNU toolchain (`riscv64-unknown-elf` 13.2.0), and `size -A` reads `.text`:
+
+```sh
+riscv64-unknown-elf-gcc -march=rv32i -mabi=ilp32 -O2 -std=c99 \
+    -ffreestanding -nostdlib -e main ripes_main.c -o gcc.elf
+riscv64-unknown-elf-as -march=rv32i -mabi=ilp32 my_solver.s -o asm.o
+riscv64-unknown-elf-ld -m elf32lriscv asm.o -o asm.elf
+```
+
+The reference is GCC's `-O2 -march=rv32i -mabi=ilp32` build of the final C algorithm, `ripes_main.c` with `search.h`:
+
+| | `.text` bytes | instructions | static data bytes | worst-state retired |
+| --- | ---: | ---: | ---: | ---: |
+| GCC `-O2` (`ripes_main.c`) | 4,204 | 1,051 | 73,872 | 32,582,677 |
+| `my_solver.s` | **2,796** | 699 | 74,454 | **26,494,697** |
+| ratio | 0.67× | | 1.01× | 0.81× |
+
+Every instruction is 4 bytes without the C extension, so `.text` is 4 × the instruction count. The disassembly of `asm.elf` holds only RV32I opcodes: `lbu sb addi add jal sltu auipc slli lw ecall bne blt beq sw sub lui jalr bgeu bge`.
+
+`my_solver.s` is smaller although it does more: the GCC build solves one fixed state and prints raw move numbers, while `my_solver.s` also runs the test list, the self check, the length check and prints move names. By label:
+
+| part | bytes |
+| --- | ---: |
+| search: base registers, `parse`, `deepen`, `loop`, ranks, descend, `pop`, `at_limit` | 896 |
+| 18 move blocks `perm_*`, `orient_*` | 1,208 |
+| test list, printing, self check, length check, summary, `print_str` | 692 |
+| total | 2,796 |
+
+The search alone is 2,104 bytes, half of GCC's. Most of GCC's extra size is `rank_perm` copied into every move case: its build has 195 `sltu` against 27 in `my_solver.s`. One `rank_perm` uses 21 and the rest of the search 6, so $27 = 21 + 6$ and $195 = 9 \times 21 + 6$. Once each `switch` case has written the child's `p`, GCC duplicates the code that follows into the case, so each of the 9 cases gets its own `rank_perm`. `my_solver.s` keeps the child's `p` in `t0`..`t6` and has every move block jump back to a single `rank_perm` (`perm_done`).
+
+Static data is 582 bytes larger, all of it outside the tables: the jump tables, the self-check state and quarter turns, the test records and the output strings. Both builds carry the same 73,809 bytes of pattern databases.
 
 ## AI Usage Disclosure
 
