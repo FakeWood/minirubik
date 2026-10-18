@@ -1198,6 +1198,56 @@ The search alone is 2,104 bytes, half of GCC's. Most of GCC's extra size is `ran
 
 Static data is 582 bytes larger, all of it outside the tables: the jump tables, the self-check state and quarter turns, the test records and the output strings. Both builds carry the same 73,809 bytes of pattern databases.
 
+### Pipeline Walkthrough
+
+This section follows the permutation cutoff of `my_solver.s`, which runs at every node, through `RV32_5S`, Ripes' 5-stage pipeline with forwarding and hazard detection. On this model T6 runs at a CPI of about 1.11, and the extra 0.11 cycle per instruction comes from the two effects seen here: a load whose result is needed right away, and a taken branch.
+
+The run uses the short scramble `26547312333212` as the only record in `tests`, with a breakpoint on the instruction to follow, and steps one cycle at a time from there.
+
+#### The Cutoff: `add`, `lbu`, `blt`
+
+The end of `rank_perm` looks up the table and cuts if the bound is above $t$:
+
+```asm
+    add  a1, a1, s4
+    lbu  a1, 0(a1)           # pdb_perm[rank]
+    blt  s7, a1, loop        # cut: pdb > t
+```
+
+Ripes names registers by number: `a1` is `x11`, `a2` `x12`, `s4` `x20`, `s7` `x23`. In the cycle below, `add x11 x11 x20` is in EX, `lbu` in ID and `blt` in IF, behind the last steps of the Horner sum (`add`, `sltu`).
+
+![img](./imgs/img1.png)
+
+- **IF:** the PC selects the instruction from instruction memory, and the PC mux takes PC + 4 as the next PC.
+- **ID:** the decoder reads the source registers and builds the control signals. For `add`: register write enable 1, ALU second operand from a register, write-back from the ALU. For `lbu`: register write enable 1, ALU second operand from the immediate (0), memory read, write-back from memory. For `blt`: register write enable 0, branch.
+- **EX:** `add` computes rank + `pdb_perm`, the address of the entry. `lbu` needs that address as its base in the very next cycle, before `add` has written `a1` back, so the forwarding unit sets the ALU's first-operand mux to take `a1` from the EX/MEM register instead of the register file.
+- **MEM:** `lbu` reads one byte of `pdb_perm` and zero-extends it. Nothing is written to memory.
+- **WB:** the write-back mux selects the loaded byte, and with register write enable 1 it goes into `a1`.
+
+`blt` compares `s7` with the loaded `a1`, but the byte only exists after `lbu`'s MEM stage. Forwarding cannot reach back in time, so the hazard unit stalls `blt` for one cycle, inserts a bubble, and then forwards `a1` from MEM/WB.
+
+Two cycles later, `lbu` is in MEM and `blt` is still in ID: the hazard unit has held `blt` (and `slli` behind it in IF) for a cycle and put `nop (stall)` into EX in its place.
+
+![img](./imgs/img2.png)
+
+While `blt` is still being decided, IF keeps fetching from PC + 4, which amounts to predicting the branch not taken. When the table cuts, `blt` is taken and that prediction is wrong: the PC mux selects the branch target `loop`, and the instructions already fetched after `blt` are flushed.
+
+This run's first cut (limit 1, move R) must be taken: the child's rank is 4307, `pdb_perm[4307]` is 4, and $t = 0$.
+
+![img](./imgs/img3-1.png)
+
+- `blt x23 x11 <loop>` is in EX, and the Branch unit's "Branch taken" output is set: the branch is decided in EX.
+- `nop (stall)` in MEM is the bubble, and `lbu x11 0 x11` is in WB, from where its byte is forwarded to `blt`.
+- IF and ID already hold the two instructions after `blt`, `add x11 x11 x19` and `slli x11 x10 2`, the start of the `move_orient` dispatch, fetched on the not-taken guess.
+
+![img](./imgs/img3-2.png)
+
+- One cycle later, those two are `nop (flush)` in ID and EX, and IF fetches `blt x23 x0 <at_limit>` (`bltz s7, at_limit`), the first instruction of `loop`.
+
+So a taken `blt` costs 2 flushed cycles, and the load before it 1 stall cycle: 3 extra cycles on every cut.
+
+This is why the move blocks load all 7 bytes before storing any: there the first `sb` uses a register loaded 7 instructions earlier, so no store waits on a load.
+
 ## AI Usage Disclosure
 
 Tool: Claude Code (Claude Opus 5.5).
