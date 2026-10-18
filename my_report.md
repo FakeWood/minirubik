@@ -370,6 +370,21 @@ The solved state of `pdb_r_face` is not entry 0, because its rank counts the R-f
 
 Every table stores one distance per byte, so there is no packed accessor and the packed-versus-unpacked check (H4) does not apply.
 
+#### All States
+
+The distance-11 states are the hardest, but the spec asks that the solution length equals the exact distance for every state (H3). `pdb_check --all` solves all 3,674,160 states with the same IDA\* and the same tables, and for each one checks that the path has $d(s)$ moves and reaches the solved state. The reference $d(s)$ comes from a full BFS from the solved state, run first on the host: BFS reaches each state first at its exact distance and uses no heuristic, so it serves as the ground truth.
+
+```text
+Solved 3674160 (all) states, 0 failures
+  nodes: min 0, median 1228, mean 2125, p99 12617, max 203475
+  worst state: 54721631111111 (d=11)
+```
+
+- wall-clock: 2 min 51 s for the whole run (BFS oracle, H1, H2 and the solves), `time ./pdb_check.exe --all`
+- machine: AMD Ryzen 7 4700U, gcc 7.3.0 (MinGW-w64) `-O2 -std=c99`
+
+The node total over all states passes $2^{32}$, and `unsigned long` is 32 bits on Windows, so the first run printed a wrapped mean of 956. The total is now 64-bit.
+
 ## Stage 3: Improve Efficiency in C
 
 ### Remove Unsupported Instructions

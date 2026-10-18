@@ -230,7 +230,10 @@ int main(int argc, char **argv)
     }
     unsigned n = 0, failures = 0;
     uint32_t worst = 0; /* queue index of the most expensive state */
-    unsigned long total = 0, worst_cost = 0;
+    /* 64-bit: over all states the total passes 2^32, and unsigned long is
+     * only 32 bits on Windows. */
+    unsigned long long total = 0;
+    unsigned long worst_cost = 0;
     for (uint32_t i = 0; i < tail; ++i) {
         uint8_t d = dist[rank_state(&queue[i])];
         if (!all && d != MAX_DEPTH)
